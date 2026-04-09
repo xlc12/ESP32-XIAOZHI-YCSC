@@ -89,7 +89,8 @@ private:
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
-                EnterWifiConfigMode();
+                ResetWifiConfiguration();
+                ESP_LOGE(TAG, "5555555555555555555555555555555555");
                 return;
             }
             app.ToggleChatState();
