@@ -386,6 +386,8 @@ choice DISPLAY_LCD_TYPE
     default LCD_ST7789_240X320
     help
         屏幕类型选择
+    config LCD_GC9A01_160X160
+        bool "GC9A01, 分辨率160*160, 小圆屏"
     config LCD_ST7789_240X320
         bool "ST7789, 分辨率240*320, IPS"
     config LCD_ST7789_240X320_NO_IPS
