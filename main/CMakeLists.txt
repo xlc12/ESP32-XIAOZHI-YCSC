@@ -966,6 +966,7 @@ idf_component_register(SRCS ${SOURCES}
                         efuse
                         bt
                         fatfs
+                        espressif__esp_lcd_gc9a01
                         ${MAIN_PRIV_REQUIRES_EXTRA}
                     )
 
