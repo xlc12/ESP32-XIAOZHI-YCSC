@@ -479,8 +479,10 @@ void Application::InitializeProtocol() {
 
     if (ota_->HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
+        ESP_LOGE(TAG, "Using MQTT protocol as specified in OTA config");
     } else if (ota_->HasWebsocketConfig()) {
         protocol_ = std::make_unique<WebsocketProtocol>();
+        ESP_LOGE(TAG, "Using Websocket protocol as specified in OTA config");
     } else {
         ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
         protocol_ = std::make_unique<MqttProtocol>();

@@ -8,7 +8,7 @@
 #include <arpa/inet.h>
 #include "assets/lang_config.h"
 
-#define TAG "MQTT"
+#define TAG "MQTT666"
 
 MqttProtocol::MqttProtocol() {
     event_group_handle_ = xEventGroupCreate();
@@ -98,6 +98,8 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
     });
 
     mqtt_->OnMessage([this](const std::string& topic, const std::string& payload) {
+        ESP_LOGE(TAG, "Received JSON data from topic: %s", topic.c_str());
+        ESP_LOGE(TAG, "Received JSON payload: %s", payload.c_str());
         cJSON* root = cJSON_Parse(payload.c_str());
         if (root == nullptr) {
             ESP_LOGE(TAG, "Failed to parse json message %s", payload.c_str());
@@ -160,6 +162,7 @@ bool MqttProtocol::SendText(const std::string& text) {
         SetError(Lang::Strings::SERVER_ERROR);
         return false;
     }
+    ESP_LOGE(TAG, " Sent text: %s", text.c_str());
     return true;
 }
 

@@ -38,6 +38,30 @@ void McpServer::AddCommonTools() {
     // Backup the original tools list and restore it after adding the common tools.
     auto original_tools = std::move(tools_);
     auto& board = Board::GetInstance();
+    auto& assets = Assets::GetInstance();
+    if (assets.partition_valid()) {
+        AddTool("self.assets.set_download_url.expression", "更新表情资源",
+            PropertyList({
+                Property("url", kPropertyTypeString)
+            }),
+            [](const PropertyList& properties) -> ReturnValue {
+                auto url = "https://dl.espressif.com/AE/wn9_nihaoxiaozhi_tts-font_puhui_common_20_4-echoear.bin";
+                ESP_LOGE(TAG, "MCP666 MCP666 set_download_url Setting download url to %s", url);
+                Settings settings("assets", true);
+                settings.SetString("download_url", url);
+                //延时1秒，确保设置生效
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
+                //重启设备以应用新的表情资源
+                auto& app = Application::GetInstance();
+                app.Schedule([&app]() {
+                ESP_LOGW(TAG, "更新表情资源 requested reboot");
+                vTaskDelay(pdMS_TO_TICKS(1000));
+
+                app.Reboot();
+                });
+                return true;
+            });
+    }
 
     // Do not add custom tools here.
     // Custom tools must be added in the board's InitializeTools function.
@@ -293,6 +317,7 @@ void McpServer::AddUserOnlyTools() {
             }),
             [](const PropertyList& properties) -> ReturnValue {
                 auto url = properties["url"].value<std::string>();
+                ESP_LOGE(TAG, "MCP666 MCP666 set_download_url Setting download url to %s", url.c_str());
                 Settings settings("assets", true);
                 settings.SetString("download_url", url);
                 return true;
