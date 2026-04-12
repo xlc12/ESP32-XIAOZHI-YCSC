@@ -1,4 +1,5 @@
 #include "wifi_board.h"
+#include "dual_network_board.h"
 #include "codecs/es8311_audio_codec.h"
 #include "display/lcd_display.h"
 #include "application.h"
@@ -6,6 +7,8 @@
 #include "config.h"
 #include "mcp_server.h"
 #include "settings.h"
+#include "motor_controller.h"
+#include "device_state.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -22,9 +25,6 @@
 #include "boards/common/da218e.h"
 #include "gsensor_action.h"
 #include <esp_lcd_gc9a01.h>
-// #include "esp_lcd_gc9a01.h"
-
-
 
 #if defined(LCD_TYPE_ILI9341_SERIAL)
 #include "esp_lcd_ili9341.h"
@@ -53,20 +53,19 @@ public:
         if (enable) {
             Es8311AudioCodec::EnableOutput(enable);
         } else {
-           // Nothing todo because the display io and PA io conflict
         }
     }
 };
 
-class YcscEsp32S3Es8311Test : public WifiBoard {
+class YcscEsp32S3Es8311Test : public DualNetworkBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
     Button boot_button_;
     Display* display_;
     light_mode_t light_mode_ = LIGHT_MODE_ALWAYS_ON;
+    MotorController motor_controller_;
 
     void InitializeI2c() {
-        // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
             .i2c_port = I2C_NUM_0,
             .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
@@ -96,18 +95,34 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting) {
-                EnterWifiConfigMode();
-                return;
+            // if (app.GetDeviceState() == kDeviceStateStarting) {
+            //     EnterWifiConfigMode();
+            //     return;
+            // }
+            if (GetNetworkType() == NetworkType::WIFI) {
+                if (app.GetDeviceState() == kDeviceStateStarting) {
+                    // cast to WifiBoard
+                    auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
+                    wifi_board.EnterWifiConfigMode();
+                    return;
+                }
             }
             app.ToggleChatState();
+            //日志输出当前网络模式和设备状态
+            ESP_LOGI(TAG, "Boot button 6666666666666clicked. Current network type: %s, Device state: %s", GetNetworkType() == NetworkType::WIFI ? "WIFI" : "ETH", app.GetDeviceState() == kDeviceStateStarting ? "Starting" : "Running");
+        });
+
+        //长按切换网络模式
+        boot_button_.OnLongPress([this]() {
+            SwitchNetworkType();
+            //日志输出当前网络模式
+            ESP_LOGI(TAG, "Switched 66666666666666network type to: %s", GetNetworkType() == NetworkType::WIFI ? "WIFI" : "ETH");
         });
     }
 
     void InitializeLcdDisplay() {
         esp_lcd_panel_io_handle_t panel_io = nullptr;
         esp_lcd_panel_handle_t panel = nullptr;
-        // 液晶屏控制IO初始化
         ESP_LOGD(TAG, "Install panel IO");
         esp_lcd_panel_io_spi_config_t io_config = {};
         io_config.cs_gpio_num = DISPLAY_CS_PIN;
@@ -119,13 +134,11 @@ private:
         io_config.lcd_param_bits = 8;
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI3_HOST, &io_config, &panel_io));
 
-        // 初始化液晶屏驱动芯片
         ESP_LOGD(TAG, "Install LCD driver");
         esp_lcd_panel_dev_config_t panel_config = {};
         panel_config.reset_gpio_num = DISPLAY_RST_PIN;
         panel_config.rgb_ele_order = DISPLAY_RGB_ORDER;
         panel_config.bits_per_pixel = 16;
-
 
 #if defined(LCD_TYPE_ILI9341_SERIAL)
         ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(panel_io, &panel_config, &panel));
@@ -144,8 +157,6 @@ private:
 #endif
         
         esp_lcd_panel_reset(panel);
- 
-
         esp_lcd_panel_init(panel);
         esp_lcd_panel_invert_color(panel, DISPLAY_INVERT_COLOR);
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
@@ -157,21 +168,35 @@ private:
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
-   
+    void InitializeMotors() {
+        motor_controller_.Init(MOTOR_HORIZ_A_PIN, MOTOR_HORIZ_B_PIN, MOTOR_VERT_A_PIN, MOTOR_VERT_B_PIN);
+    }
+
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
-        // 定义设备的属性
+        mcp_server.AddTool("wag_tail", "摇尾巴", 
+            PropertyList(),
+            [this](const PropertyList& props) -> ReturnValue {
+                motor_controller_.RunWagTailSequence(3, VERT_WAG_TAIL_DURATION_MS, HORIZ_WAG_TAIL_DURATION_MS);
+                return std::string("摇尾巴动作执行完成");
+            }
+        );
     }
 
 public:
-    YcscEsp32S3Es8311Test() : boot_button_(BOOT_BUTTON_GPIO) {
+    YcscEsp32S3Es8311Test() : 
+    DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN),
+    boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
         InitializeSpi();
         InitializeLcdDisplay();
         InitializeButtons();
+        InitializeMotors();
     
         InitializeTools();
         GetBacklight()->RestoreBrightness();
+        
+        motor_controller_.RunWagTailSequence(3, VERT_WAG_TAIL_DURATION_MS, HORIZ_WAG_TAIL_DURATION_MS);
     }
 
     virtual AudioCodec* GetAudioCodec() override {
