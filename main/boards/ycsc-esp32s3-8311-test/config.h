@@ -38,24 +38,34 @@ typedef enum {
 
 
 
-/*酱酒猫*/
-#define DISPLAY_DC_PIN     GPIO_NUM_11
-#define DISPLAY_CS_PIN     GPIO_NUM_12
-#define DISPLAY_CLK_PIN    GPIO_NUM_13
-#define DISPLAY_MOSI_PIN   GPIO_NUM_14
+// /*酱酒猫*/
+// #define DISPLAY_DC_PIN     GPIO_NUM_11
+// #define DISPLAY_CS_PIN     GPIO_NUM_12
+// #define DISPLAY_CLK_PIN    GPIO_NUM_13
+// #define DISPLAY_MOSI_PIN   GPIO_NUM_14
 
-#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_15
-#define DISPLAY_RST_PIN       GPIO_NUM_21
+// #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_15
+// #define DISPLAY_RST_PIN       GPIO_NUM_21
+
+// 电机引脚定义
+#define MOTOR_HORIZ_A_PIN     GPIO_NUM_11
+#define MOTOR_HORIZ_B_PIN     GPIO_NUM_12
+#define MOTOR_VERT_A_PIN      GPIO_NUM_46
+#define MOTOR_VERT_B_PIN      GPIO_NUM_3
+//垂直摇摆时间
+#define VERT_WAG_TAIL_DURATION_MS 400
+//水平摇摆时间
+#define HORIZ_WAG_TAIL_DURATION_MS 500
 
 
-// /*龙昌猫*/
-// #define DISPLAY_DC_PIN     GPIO_NUM_6
-// #define DISPLAY_CS_PIN     GPIO_NUM_5
-// #define DISPLAY_CLK_PIN    GPIO_NUM_16
-// #define DISPLAY_MOSI_PIN   GPIO_NUM_15
+/*龙昌猫*/
+#define DISPLAY_DC_PIN     GPIO_NUM_6
+#define DISPLAY_CS_PIN     GPIO_NUM_5
+#define DISPLAY_CLK_PIN    GPIO_NUM_16
+#define DISPLAY_MOSI_PIN   GPIO_NUM_15
 
-// #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_4
-// #define DISPLAY_RST_PIN       GPIO_NUM_7
+#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_4
+#define DISPLAY_RST_PIN       GPIO_NUM_7
 
 
 #ifdef CONFIG_LCD_GC9A01_160X160
