@@ -12,6 +12,8 @@
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <driver/uart.h>
+#include <driver/gpio.h>
+#include <esp_timer.h>
 #include <cstring>
 
 #if defined(LCD_TYPE_ILI9341_SERIAL)
@@ -44,6 +46,13 @@ private:
     Display* display_;
     light_mode_t light_mode_ = LIGHT_MODE_ALWAYS_ON;
     PowerManager* power_manager_;
+    esp_timer_handle_t motor_timer_;
+    bool motor_running_;
+
+    static void MotorTimerCallback(void* arg) {
+        YcscEsp32S3Es8311WgxlCat* board = static_cast<YcscEsp32S3Es8311WgxlCat*>(arg);
+        board->MotorStop();
+    }
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -167,6 +176,24 @@ private:
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
         // 定义设备的属性
+        mcp_server.AddTool("self.motor",
+            "指到谁谁喝酒，当听到转圈、指到谁谁喝酒时执行该操作; ",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                //随机转动时间，范围在1-5秒之间
+                int time = rand() % 10 + 1;
+                //正转反转随机1或2：MOTOR_FORWARD、MOTOR_BACKWARD
+                int direction = rand() % 2 + 1;
+                if (direction == 1) {
+                    direction = MOTOR_FORWARD;
+                } else {
+                    direction = MOTOR_BACKWARD;
+                }
+                //日志输出转动时间和转动方向
+                ESP_LOGI(TAG, "电机转动MotorControl: direction=%d, time=%d", direction, time);
+                MotorControl(direction, time*500);
+                return true;
+            });
     }
 
 
@@ -176,7 +203,68 @@ private:
         new PowerManager(POWER_CHARGE_DETECT_PIN, POWER_CHARGE_COMPLETE_PIN, POWER_ADC_UNIT, POWER_ADC_CHANNEL);
     }
 
-   
+    //电机控制
+    //电机初始化
+    void InitializeMotor() {
+        motor_running_ = false;
+        gpio_set_direction(MOTOR_IN_1_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_direction(MOTOR_IN_2_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(MOTOR_IN_1_PIN, 0); 
+        gpio_set_level(MOTOR_IN_2_PIN, 0); 
+
+        esp_timer_create_args_t timer_args = {
+            .callback = &MotorTimerCallback,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "motor_timer"
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &motor_timer_));
+    }
+
+    //电机控制：参数1：正转、反转和停止；参数2：转动时间，单位毫秒，为负数时表示持续转动
+    void MotorControl(int direction, int time) {
+        if (direction == 0) {
+            MotorStop();
+            return;
+        }
+        
+        if (motor_running_) {
+            esp_timer_stop(motor_timer_);
+        }
+        
+        if (direction == 1) {
+            MotorForward();
+        } else if (direction == 2) {
+            MotorBackward();
+        }
+        
+        motor_running_ = true;
+        
+        if (time >= 0) {
+            esp_timer_start_once(motor_timer_, time * 1000);
+        }
+    }
+
+    //电机正转  
+    void MotorForward() {
+        gpio_set_level(MOTOR_IN_1_PIN, 0); 
+        gpio_set_level(MOTOR_IN_2_PIN, 1); 
+    }
+
+    //电机反转
+    void MotorBackward() {
+        gpio_set_level(MOTOR_IN_1_PIN, 1); 
+        gpio_set_level(MOTOR_IN_2_PIN, 0); 
+    }
+
+    //电机停止
+    void MotorStop() {
+        gpio_set_level(MOTOR_IN_1_PIN, 0); 
+        gpio_set_level(MOTOR_IN_2_PIN, 0); 
+        motor_running_ = false;
+        esp_timer_stop(motor_timer_);
+    }
+
 public:
     YcscEsp32S3Es8311WgxlCat() : boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
@@ -187,7 +275,18 @@ public:
         InitializeTools();
 
         InitializePowerManager();
+        InitializeMotor();
+        //开机正转1秒，反转1秒，停止
+        MotorControl(MOTOR_FORWARD, 1000);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        MotorControl(MOTOR_BACKWARD, 1000);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        MotorControl(MOTOR_STOP, 0);
+
+        //开机后自动进入低功耗模式
         GetBacklight()->RestoreBrightness();
+
+
     }
 
     virtual AudioCodec* GetAudioCodec() override {

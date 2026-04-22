@@ -59,6 +59,22 @@ typedef enum {
 #define POWER_ADC_UNIT ADC_UNIT_1
 #define POWER_ADC_CHANNEL ADC_CHANNEL_9
 
+//电机控制: （适配分开两个板子后第一次打板 属于临时方案）
+//正转宏定义
+#define MOTOR_FORWARD 1
+//反转宏定义
+#define MOTOR_BACKWARD 2
+//停止宏定义
+#define MOTOR_STOP 0
+//一直转动时间设置为-1
+#define MOTOR_CONTINUOUS_TIME -1
+
+#define MOTOR_IN_1_PIN GPIO_NUM_46
+#define MOTOR_IN_2_PIN GPIO_NUM_45
+
+//最新板
+// #define MOTOR_IN_1_PIN GPIO_NUM_45
+// #define MOTOR_IN_2_PIN GPIO_NUM_48
 
 
 #ifdef CONFIG_LCD_GC9A01_160X160
