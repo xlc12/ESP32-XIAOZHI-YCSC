@@ -26,6 +26,7 @@
 #include <esp_lcd_gc9a01.h>
 #include "otto_emoji_display.h" 
 #include "power_manager.h"
+#include "power_save_timer.h"
 
 
 #if defined(LCD_TYPE_ILI9341_SERIAL)
@@ -48,6 +49,8 @@ private:
     PowerManager* power_manager_;
     esp_timer_handle_t motor_timer_;
     bool motor_running_;
+
+    PowerSaveTimer *power_save_timer_;
 
     static void MotorTimerCallback(void* arg) {
         YcscEsp32S3Es8311WgxlCat* board = static_cast<YcscEsp32S3Es8311WgxlCat*>(arg);
@@ -90,6 +93,9 @@ private:
                 return;
             }
             app.ToggleChatState();
+            //日志打印
+            ESP_LOGI(TAG, "66666666666666666666666666666666");
+            // power_save_timer_->WakeUp();
         });
     }
 
@@ -181,7 +187,7 @@ private:
             PropertyList(),
             [this](const PropertyList& properties) -> ReturnValue {
                 //随机转动时间，范围在1-5秒之间
-                int time = rand() % 10 + 1;
+                int time = rand() % 15 + 3;
                 //正转反转随机1或2：MOTOR_FORWARD、MOTOR_BACKWARD
                 int direction = rand() % 2 + 1;
                 if (direction == 1) {
@@ -191,7 +197,7 @@ private:
                 }
                 //日志输出转动时间和转动方向
                 ESP_LOGI(TAG, "电机转动MotorControl: direction=%d, time=%d", direction, time);
-                MotorControl(direction, time*500);
+                MotorControl(direction, time*1000);
                 return true;
             });
     }
@@ -201,6 +207,32 @@ private:
     void InitializePowerManager() {
         power_manager_ =
         new PowerManager(POWER_CHARGE_DETECT_PIN, POWER_CHARGE_COMPLETE_PIN, POWER_ADC_UNIT, POWER_ADC_CHANNEL);
+    }
+
+    //省电管理
+    void InitializePowerSaveTimer() {
+        power_save_timer_ = new PowerSaveTimer(-1, 10, 300);
+        power_save_timer_->OnEnterSleepMode([this]() {
+
+            auto display = GetDisplay();
+            display->SetEmotion("Sleep_1_5");
+            ESP_LOGI(TAG, "省电管理： 开启");
+
+
+        });
+        power_save_timer_->OnExitSleepMode([this]() {
+            auto display = GetDisplay();
+            display->SetEmotion("FaCai_1_2");
+            ESP_LOGI(TAG, "省电管理： 关闭");
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+        
+                // 日志输出省电模式开启
+                ESP_LOGI(TAG, "省电管理： 关机");
+            
+        });
+
+        power_save_timer_->SetEnabled(true);
     }
 
     //电机控制
@@ -277,14 +309,16 @@ public:
         InitializePowerManager();
         InitializeMotor();
         //开机正转1秒，反转1秒，停止
-        MotorControl(MOTOR_FORWARD, 1000);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        MotorControl(MOTOR_BACKWARD, 1000);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        MotorControl(MOTOR_FORWARD, 2000);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        MotorControl(MOTOR_BACKWARD, 2000);
+        vTaskDelay(pdMS_TO_TICKS(2000));
         MotorControl(MOTOR_STOP, 0);
 
         //开机后自动进入低功耗模式
         GetBacklight()->RestoreBrightness();
+
+        InitializePowerSaveTimer();
 
 
     }
@@ -310,6 +344,12 @@ public:
         discharging = !charging;
         level = power_manager_->GetBatteryLevel();
         return true;
+    }
+
+    virtual void WakeUp() override {
+        if (power_save_timer_) {
+            power_save_timer_->WakeUp();
+        }
     }
 
 };

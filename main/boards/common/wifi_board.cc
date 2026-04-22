@@ -49,7 +49,7 @@ void WifiBoard::EnterWifiConfigMode() {
     hint += "\n\n";
     
     // 播报配置 WiFi 的提示
-    application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "gear", Lang::Sounds::OGG_WIFICONFIG);
+    application.Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "gear", Lang::Sounds::OGG_1_1_WIFI_CONFIG);
 
     #if CONFIG_USE_ACOUSTIC_WIFI_PROVISIONING
     auto display = Board::GetInstance().GetDisplay();
@@ -98,9 +98,12 @@ void WifiBoard::StartNetwork() {
     });
     wifi_station.OnConnected([this](const std::string& ssid) {
         auto display = Board::GetInstance().GetDisplay();
+        auto& app = Application::GetInstance();
         std::string notification = Lang::Strings::CONNECTED_TO;
         notification += ssid;
         display->ShowNotification(notification.c_str(), 30000);
+        // 播报 WiFi 连接成功提示
+        app.PlaySound(Lang::Sounds::OGG_1_2_WIFI_CONNET_SUC);
     });
     wifi_station.Start();
 

@@ -81,6 +81,8 @@ private:
         if(is_charging_ && (last_start_charging_flag == 0)){
             last_start_charging_flag = 1;
             app.PlaySound(Lang::Sounds::OGG_1_5_CHARGING);
+            auto display = Board::GetInstance().GetDisplay();
+            display->SetEmotion("Charging_1_1");
         }
 
         //充电器拔出
@@ -123,12 +125,12 @@ private:
  
         CalculateBatteryLevel(average_adc);
 
-        ESP_LOGI("PowerManager", "ADC值: %d ，平均值: %ld ，电量: %u%% ，充电状态: %s ，充电完成状态: %s", 
-                 adc_value, 
-                 average_adc, 
-                 battery_level_, 
-                 is_charging_ ? "充电中" : "未充电", 
-                 is_charging_complete_ ? "充电完成" : "未充电完成");
+        // ESP_LOGI("PowerManager", "ADC值: %d ，平均值: %ld ，电量: %u%% ，充电状态: %s ，充电完成状态: %s", 
+        //          adc_value, 
+        //          average_adc, 
+        //          battery_level_, 
+        //          is_charging_ ? "充电中" : "未充电", 
+        //          is_charging_complete_ ? "充电完成" : "未充电完成");
     }
 
     void CalculateBatteryLevel(uint32_t average_adc) {
@@ -167,7 +169,7 @@ public:
             .skip_unhandled_events = true,
         };
         ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handle_));
-        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 1000000));  
+        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handle_, 1*1000*1000));  
 
         InitializeAdc();
         

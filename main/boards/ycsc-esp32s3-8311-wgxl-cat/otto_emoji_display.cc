@@ -13,6 +13,16 @@
 
 // 表情映射表 - 将原版21种表情映射到现有6个GIF
 const OttoEmojiDisplay::EmotionMap OttoEmojiDisplay::emotion_maps_[] = {
+
+    {"Charging_1_1", &Charging_1_1},
+    {"FaCai_1_2", &FaCai_1_2},
+    {"Listen_1_3", &Listen_1_3},
+    {"Speak_1_4", &Speak_1_4},
+    {"Sleep_1_5", &Sleep_1_5},
+
+
+
+
     // 中性/平静类表情 -> staticstate
     {"neutral", &Listen_1_3},
     {"relaxed", &Listen_1_3},
