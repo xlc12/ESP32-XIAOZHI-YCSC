@@ -3,6 +3,7 @@
 
 #include <driver/gpio.h>
 #include <driver/uart.h>
+#include "assets/lang_config.h"
 
 #define AUDIO_INPUT_SAMPLE_RATE  16000
 #define AUDIO_OUTPUT_SAMPLE_RATE 16000
@@ -48,9 +49,16 @@ typedef enum {
 #define DISPLAY_RST_PIN       GPIO_NUM_21
 
 // 电池
-#define POWER_CHARGE_DETECT_PIN GPIO_NUM_10
+#define LOW_BATTERY_ALARM_LEVEL 20      //低电量报警阈值
+#define LOW_BATTERY_ALARM_INTERVAL_MS 20//低电量报警间隔时间，单位秒
+#define CHARGING_COMPLETE_ALARM_INTERVAL_MS 10 //充电完成报警间隔时间，单位秒
+
+// #define POWER_CHARGE_DETECT_PIN GPIO_NUM_46  最新板
+#define POWER_CHARGE_DETECT_PIN GPIO_NUM_48 // 第一次打板
+#define POWER_CHARGE_COMPLETE_PIN GPIO_NUM_47
 #define POWER_ADC_UNIT ADC_UNIT_1
 #define POWER_ADC_CHANNEL ADC_CHANNEL_9
+
 
 
 #ifdef CONFIG_LCD_GC9A01_160X160

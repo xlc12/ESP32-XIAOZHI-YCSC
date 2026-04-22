@@ -22,9 +22,8 @@
 // #include "boards/common/da218e.h"
 // #include "gsensor_action.h"
 #include <esp_lcd_gc9a01.h>
-// #include "esp_lcd_gc9a01.h"
-#include "otto_emoji_display.h"  // 添加这行
-
+#include "otto_emoji_display.h" 
+#include "power_manager.h"
 
 
 #if defined(LCD_TYPE_ILI9341_SERIAL)
@@ -44,6 +43,7 @@ private:
     Button boot_button_;
     Display* display_;
     light_mode_t light_mode_ = LIGHT_MODE_ALWAYS_ON;
+    PowerManager* power_manager_;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -169,6 +169,14 @@ private:
         // 定义设备的属性
     }
 
+
+    //ADC电池管理
+    void InitializePowerManager() {
+        power_manager_ =
+        new PowerManager(POWER_CHARGE_DETECT_PIN, POWER_CHARGE_COMPLETE_PIN, POWER_ADC_UNIT, POWER_ADC_CHANNEL);
+    }
+
+   
 public:
     YcscEsp32S3Es8311WgxlCat() : boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
@@ -177,6 +185,8 @@ public:
         InitializeButtons();
     
         InitializeTools();
+
+        InitializePowerManager();
         GetBacklight()->RestoreBrightness();
     }
 
@@ -194,6 +204,13 @@ public:
     virtual Backlight* GetBacklight() override {
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
+    }
+
+    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override {
+        charging = power_manager_->IsCharging();
+        discharging = !charging;
+        level = power_manager_->GetBatteryLevel();
+        return true;
     }
 
 };
