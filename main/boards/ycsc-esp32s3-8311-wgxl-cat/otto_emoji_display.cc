@@ -41,20 +41,20 @@ const OttoEmojiDisplay::EmotionMap OttoEmojiDisplay::emotion_maps_[] = {
     {"silly", &Listen_1_3},
 
     // 悲伤类表情 -> sad
-    {"sad", &sad},
-    {"crying", &sad},
+    {"sad", &Listen_1_3},
+    {"crying", &Listen_1_3},
 
     // 愤怒类表情 -> anger
-    {"angry", &anger},
+    {"angry", &Listen_1_3},
 
     // 惊讶类表情 -> scare
-    {"surprised", &scare},
-    {"shocked", &scare},
+    {"surprised", &Listen_1_3},
+    {"shocked", &Listen_1_3},
 
     // 思考/困惑类表情 -> buxue
-    {"thinking", &buxue},
-    {"confused", &buxue},
-    {"embarrassed", &buxue},
+    {"thinking", &Listen_1_3},
+    {"confused", &Listen_1_3},
+    {"embarrassed", &Listen_1_3},
 
     {nullptr, nullptr}  // 结束标记
 };
@@ -102,7 +102,7 @@ void OttoEmojiDisplay::SetupGifContainer() {
     lv_obj_set_style_border_width(emotion_gif_, 0, 0);
     lv_obj_set_style_bg_opa(emotion_gif_, LV_OPA_TRANSP, 0);
     lv_obj_center(emotion_gif_);
-    lv_gif_set_src(emotion_gif_, &staticstate);
+    lv_gif_set_src(emotion_gif_, &FaCai_1_2);
 
     chat_message_label_ = lv_label_create(content_);
     lv_label_set_text(chat_message_label_, "");

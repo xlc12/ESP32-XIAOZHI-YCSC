@@ -308,6 +308,12 @@ public:
 
         InitializePowerManager();
         InitializeMotor();
+
+        //开机后自动进入低功耗模式
+        GetBacklight()->RestoreBrightness();
+
+        InitializePowerSaveTimer();
+        
         //开机正转1秒，反转1秒，停止
         MotorControl(MOTOR_FORWARD, 2000);
         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -315,10 +321,7 @@ public:
         vTaskDelay(pdMS_TO_TICKS(2000));
         MotorControl(MOTOR_STOP, 0);
 
-        //开机后自动进入低功耗模式
-        GetBacklight()->RestoreBrightness();
-
-        InitializePowerSaveTimer();
+        
 
 
     }
