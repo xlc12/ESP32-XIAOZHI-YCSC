@@ -23,6 +23,7 @@
 // #include "gsensor_action.h"
 #include <esp_lcd_gc9a01.h>
 // #include "esp_lcd_gc9a01.h"
+#include "otto_emoji_display.h"  // 添加这行
 
 
 
@@ -132,7 +133,7 @@ private:
 #ifdef  LCD_TYPE_GC9A01_SERIAL
         panel_config.vendor_config = &gc9107_vendor_config;
 #endif
-        display_ = new SpiLcdDisplay(panel_io, panel,
+        display_ = new OttoEmojiDisplay(panel_io, panel,
             DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY,
             {
                 .text_font = &font_puhui_16_4,
@@ -143,6 +144,22 @@ private:
                 .emoji_font = DISPLAY_HEIGHT >= 240 ? font_emoji_64_init() : font_emoji_32_init(),
         #endif
             });
+
+
+
+        // xlc add -begin
+
+       //左屏水平镜像
+       gpio_set_direction(DISPLAY_CS_PIN, GPIO_MODE_OUTPUT);
+       gpio_set_level(DISPLAY_CS_PIN, 1);
+       //延时100ms
+       vTaskDelay(pdMS_TO_TICKS(50));
+       //esp_lcd_panel_swap_xy(lcd_panel, true);
+       esp_lcd_panel_mirror(panel, false,true);  // 水平镜像
+       vTaskDelay(pdMS_TO_TICKS(50));
+       gpio_set_level(DISPLAY_CS_PIN, 0);
+                            
+       //xlc add -end     
 
     }
 
