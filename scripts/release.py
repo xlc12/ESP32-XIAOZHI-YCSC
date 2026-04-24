@@ -5,6 +5,7 @@ import zipfile
 import argparse
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 # Switch to project root directory
 os.chdir(Path(__file__).resolve().parent.parent)
@@ -44,18 +45,45 @@ def merge_bin() -> None:
         sys.exit(1)
 
 
-def zip_bin(name: str, version: str) -> None:
-    """Zip build/merged-binary.bin to releases/v{version}_{name}.zip"""
+def zip_bin(name: str, version: str, create_zip: bool = False) -> None:
+    """Zip build/*.bin to releases/{name}-v{version}-{date}.zip
+
+    Args:
+        name: Board name
+        version: Project version
+        create_zip: If True, create zip file (default: False)
+    """
+    if not create_zip:
+        print("Skip creating zip file")
+        return
+
     out_dir = Path("releases")
     out_dir.mkdir(exist_ok=True)
-    output_path = out_dir / f"v{version}_{name}.zip"
+
+    # Generate date string in format YYYY-MM-DD_HH-MM
+    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    output_path = out_dir / f"{name}-v{version}-{date_str}.zip"
 
     if output_path.exists():
         output_path.unlink()
 
+    build_dir = Path("build")
+
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write("build/merged-binary.bin", arcname="merged-binary.bin")
-    print(f"zip bin to {output_path} done")
+        # Add merged binary
+        merged_bin = build_dir / "merged-binary.bin"
+        if merged_bin.exists():
+            zipf.write(str(merged_bin), arcname="merged-binary.bin")
+            print(f"Added merged-binary.bin")
+
+        # Add all individual bin files
+        bin_files = list(build_dir.glob("*.bin"))
+        for bin_file in bin_files:
+            if bin_file.name != "merged-binary.bin":
+                zipf.write(str(bin_file), arcname=f"bin/{bin_file.name}")
+                print(f"Added bin/{bin_file.name}")
+
+    print(f"Zip created: {output_path}")
 
 ################################################################################
 # board / variant related functions
@@ -126,13 +154,14 @@ def _board_type_exists(board_type: str) -> bool:
 # Compile implementation
 ################################################################################
 
-def release(board_type: str, config_filename: str = "config.json", *, filter_name: Optional[str] = None) -> None:
+def release(board_type: str, config_filename: str = "config.json", *, filter_name: Optional[str] = None, create_zip: bool = False) -> None:
     """Compile and package all/specified variants of the specified board_type
 
     Args:
         board_type: directory name under main/boards
         config_filename: config.json name (default: config.json)
         filter_name: if specified, only compile the build["name"] that matches
+        create_zip: if True, create zip file (default: False)
     """
     cfg_path = _BOARDS_DIR / board_type / config_filename
     if not cfg_path.exists():
@@ -195,7 +224,7 @@ def release(board_type: str, config_filename: str = "config.json", *, filter_nam
         merge_bin()
 
         # Zip
-        zip_bin(name, project_version)
+        zip_bin(final_name, project_version, create_zip)
 
 ################################################################################
 # CLI entry
@@ -203,11 +232,12 @@ def release(board_type: str, config_filename: str = "config.json", *, filter_nam
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("board", nargs="?", default=None, help="板子类型或 all")
-    parser.add_argument("-c", "--config", default="config.json", help="指定 config 文件名，默认 config.json")
-    parser.add_argument("--list-boards", action="store_true", help="列出所有支持的 board 及变体列表")
-    parser.add_argument("--json", action="store_true", help="配合 --list-boards，JSON 格式输出")
-    parser.add_argument("--name", help="指定变体名称，仅编译匹配的变体")
+    parser.add_argument("board", nargs="?", default=None, help="Board type or 'all'")
+    parser.add_argument("-c", "--config", default="config.json", help="Config filename (default: config.json)")
+    parser.add_argument("--list-boards", action="store_true", help="List all supported boards and variants")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format (use with --list-boards)")
+    parser.add_argument("--name", help="Variant name to compile (original name without manufacturer prefix)")
+    parser.add_argument("--zip", action="store_true", help="Create zip file (default: False)")
 
     args = parser.parse_args()
 
@@ -229,7 +259,7 @@ if __name__ == "__main__":
             print("未能从 compile_commands.json 解析 board_type", file=sys.stderr)
             sys.exit(1)
         project_ver = get_project_version()
-        zip_bin(curr_board_type, project_ver)
+        zip_bin(curr_board_type, project_ver, args.zip)
         sys.exit(0)
 
     # Compile mode
@@ -258,4 +288,4 @@ if __name__ == "__main__":
         if bt == board_type_input and not cfg_path.exists():
             print(f"开发板 {bt} 未定义 {args.config} 配置文件，跳过")
             sys.exit(0)
-        release(bt, config_filename=args.config, filter_name=name_filter if bt == board_type_input else None)
+        release(bt, config_filename=args.config, filter_name=name_filter if bt == board_type_input else None, create_zip=args.zip)
