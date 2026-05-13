@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>机器人眼睛 320x172</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* 机器人屏幕尺寸：320×172 横版 */
+        .robot-eye-screen {
+            width: 320px;
+            height: 172px;
+            background: #000;
+            position: relative;
+            margin: 20px auto;
+            overflow: hidden;
+        }
+
+        /* 眼镜框架 */
+        .glasses {
+            position: absolute;
+            top: 40px;
+            left: 60px;
+            width: 200px;
+            height: 90px;
+        }
+
+        /* 左眼镜圈 + 眼睛 */
+        .left-eye {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border: 6px solid #ffffff;
+            border-radius: 10px;
+            background: #1a1a1a;
+        }
+
+        /* 右眼镜圈 + 眼睛 */
+        .right-eye {
+            position: absolute;
+            left: 120px;
+            width: 80px;
+            height: 80px;
+            border: 6px solid #ffffff;
+            border-radius: 10px;
+            background: #1a1a1a;
+        }
+
+        /* 眼球 */
+        .eyeball {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 40px;
+            height: 40px;
+            background: #00d9ff;
+            border-radius: 50%;
+            box-shadow: 0 0 15px #00d9ff;
+            animation: blink 3s infinite ease-in-out;
+        }
+
+        /* 眼镜横梁 */
+        .bridge {
+            position: absolute;
+            top: 37px;
+            left: 77px;
+            width: 46px;
+            height: 6px;
+            background: #ffffff;
+        }
+
+        /* 眨眼动画 */
+        @keyframes blink {
+            0%, 90%, 100% { opacity: 1; }
+            95% { opacity: 0.2; }
+        }
+    </style>
+</head>
+<body>
+    <div class="robot-eye-screen">
+        <div class="glasses">
+            <div class="left-eye">
+                <div class="eyeball"></div>
+            </div>
+            <div class="right-eye">
+                <div class="eyeball"></div>
+            </div>
+            <div class="bridge"></div>
+        </div>
+    </div>
+</body>
+</html>
