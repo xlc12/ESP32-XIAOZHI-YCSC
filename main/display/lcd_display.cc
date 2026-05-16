@@ -18,6 +18,8 @@
 
 #define TAG "LcdDisplay"
 
+#define CONFIG_EMOJI_ONLY_MODE 1
+
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 LV_FONT_DECLARE(font_awesome_30_4);
@@ -64,8 +66,8 @@ void LcdDisplay::InitializeLcdThemes() {
 
 LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, int width, int height)
     : panel_io_(panel_io), panel_(panel) {
-    width_ = width;
-    height_ = height;
+    width_ = height;
+    height_ =width ;
 
     // Initialize LCD themes
     InitializeLcdThemes();
@@ -828,6 +830,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_border_width(container_, 0, 0);
     lv_obj_set_style_bg_color(container_, lvgl_theme->background_color(), 0);
     lv_obj_set_style_border_color(container_, lvgl_theme->border_color(), 0);
+#ifdef CONFIG_EMOJI_ONLY_MODE
+    lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);  // Hide container in emoji-only mode
+#endif
 
     /* Bottom layer: emoji_box_ - centered display */
     emoji_box_ = lv_obj_create(screen);
@@ -851,6 +856,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_size(preview_image_, width_ / 2, height_ / 2);
     lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+#ifdef CONFIG_EMOJI_ONLY_MODE
+    lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);  // Hide container in emoji-only mode
+#endif
 
     /* Layer 1: Top bar - for status icons */
     top_bar_ = lv_obj_create(screen);
@@ -868,6 +876,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_flex_align(top_bar_, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_scrollbar_mode(top_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_align(top_bar_, LV_ALIGN_TOP_MID, 0, 0);
+#ifdef CONFIG_EMOJI_ONLY_MODE
+    lv_obj_add_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);  // Hide top bar in emoji-only mode
+#endif
 
     // Left icon
     network_label_ = lv_label_create(top_bar_);
@@ -907,6 +918,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_scrollbar_mode(status_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
     lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);  // Overlap with top_bar_
+#if defined(CONFIG_HIDE_STATUS_BAR) || defined(CONFIG_EMOJI_ONLY_MODE)
+    lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);  // Hide status bar
+#endif
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_width(notification_label_, LV_HOR_RES * 0.75);
@@ -960,6 +974,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_border_width(bottom_bar_, 0, 0);
     lv_obj_set_scrollbar_mode(bottom_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_align(bottom_bar_, LV_ALIGN_BOTTOM_MID, 0, 0);
+#ifdef CONFIG_EMOJI_ONLY_MODE
+    lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);  // Hide bottom bar in emoji-only mode
+#endif
 
     /* chat_message_label_ placed in bottom_bar_, single-line horizontal scroll */
     chat_message_label_ = lv_label_create(bottom_bar_);
