@@ -112,7 +112,7 @@ private:
             ESP_LOGI(TAG, "Boot button 6666666666666clicked. Current network type: %s, Device state: %s", GetNetworkType() == NetworkType::WIFI ? "WIFI" : "ETH", app.GetDeviceState() == kDeviceStateStarting ? "Starting" : "Running");
         });
 
-        //长按切换网络模式
+        //长按切换网络模式---龙昌猫
         boot_button_.OnLongPress([this]() {
             SwitchNetworkType();
             //日志输出当前网络模式

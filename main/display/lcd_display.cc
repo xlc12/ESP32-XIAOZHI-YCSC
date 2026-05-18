@@ -876,9 +876,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_flex_align(top_bar_, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_scrollbar_mode(top_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_align(top_bar_, LV_ALIGN_TOP_MID, 0, 0);
-#ifdef CONFIG_EMOJI_ONLY_MODE
-    lv_obj_add_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);  // Hide top bar in emoji-only mode
-#endif
+// #ifdef CONFIG_EMOJI_ONLY_MODE
+//     lv_obj_add_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);  // Hide top bar in emoji-only mode
+// #endif
 
     // Left icon
     network_label_ = lv_label_create(top_bar_);
@@ -918,9 +918,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_scrollbar_mode(status_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
     lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);  // Overlap with top_bar_
-#if defined(CONFIG_HIDE_STATUS_BAR) || defined(CONFIG_EMOJI_ONLY_MODE)
-    lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);  // Hide status bar
-#endif
+// #if defined(CONFIG_HIDE_STATUS_BAR) || defined(CONFIG_EMOJI_ONLY_MODE)
+//     lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);  // Hide status bar
+// #endif
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_width(notification_label_, LV_HOR_RES * 0.75);
