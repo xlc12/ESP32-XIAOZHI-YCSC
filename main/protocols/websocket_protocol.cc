@@ -67,6 +67,7 @@ bool WebsocketProtocol::SendText(const std::string& text) {
         SetError(Lang::Strings::SERVER_ERROR);
         return false;
     }
+    ESP_LOGE(TAG, " Sent text: %s", text.c_str());
 
     return true;
 }
@@ -146,6 +147,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
                 }
             }
         } else {
+            std::string json_str(data, len);
+            ESP_LOGE(TAG, "Received JSON data: %s", json_str.c_str());
             // Parse JSON data
             auto root = cJSON_ParseWithLength(data, len);
             auto type = cJSON_GetObjectItem(root, "type");

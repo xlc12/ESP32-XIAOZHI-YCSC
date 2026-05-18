@@ -85,7 +85,17 @@ set(EMOTE_RESOLUTION "320_240")
 
 # Add board files according to BOARD_TYPE
 # Set default assets if the board uses partition table V2
-if(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI)
+if(CONFIG_BOARD_TYPE_YCSC_ESP32S3_8311_TEST)
+    set(BOARD_TYPE "ycsc-esp32s3-8311-test")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
+    set(BUILTIN_ICON_FONT font_awesome_14_1)
+    set(DEFAULT_EMOJI_COLLECTION noto-emoji_128)
+elseif(CONFIG_BOARD_TYPE_YCSC_ESP32S3_8311_WGXL_CAT)
+    set(BOARD_TYPE "ycsc-esp32s3-8311-wgxl-cat")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
+    set(BUILTIN_ICON_FONT font_awesome_14_1)
+    set(DEFAULT_EMOJI_COLLECTION noto-emoji_128)
+elseif(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI)
     set(BOARD_TYPE "bread-compact-wifi")
     set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
     set(BUILTIN_ICON_FONT font_awesome_14_1)
@@ -966,6 +976,7 @@ idf_component_register(SRCS ${SOURCES}
                         efuse
                         bt
                         fatfs
+                        espressif__esp_lcd_gc9a01
                         ${MAIN_PRIV_REQUIRES_EXTRA}
                     )
 

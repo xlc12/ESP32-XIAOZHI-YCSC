@@ -21,6 +21,10 @@ private:
     gpio_num_t pa_pin_ = GPIO_NUM_NC;
     bool pa_inverted_ = false;
     std::mutex data_if_mutex_;
+    
+    #if CONFIG_USE_DEVICE_AEC   // 是否使用回声消除
+    std::vector<int16_t> stereo_buffer_;  // 用于单通道到双通道转换的缓冲区
+    #endif
 
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din);
     void UpdateDeviceState();

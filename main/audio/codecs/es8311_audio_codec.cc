@@ -8,8 +8,13 @@ Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
     gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
     gpio_num_t pa_pin, uint8_t es8311_addr, bool use_mclk, bool pa_inverted) {
     duplex_ = true; // 是否双工
+    #if CONFIG_USE_DEVICE_AEC   // 是否使用回声消除
+    input_reference_ = true; // 是否使用参考输入，实现回声消除
+    input_channels_ = 2; // 输入通道数
+    #else
     input_reference_ = false; // 是否使用参考输入，实现回声消除
     input_channels_ = 1; // 输入通道数
+    #endif
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
     pa_pin_ = pa_pin;
@@ -49,6 +54,9 @@ Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
     es8311_cfg.hw_gain.pa_voltage = 5.0;
     es8311_cfg.hw_gain.codec_dac_voltage = 3.3;
     es8311_cfg.pa_reverted = pa_inverted_;
+    #if CONFIG_USE_DEVICE_AEC   // 是否使用回声消除
+    es8311_cfg.no_dac_ref = !input_reference_;
+    #endif
     codec_if_ = es8311_codec_new(&es8311_cfg);
 
     if (codec_if_ == nullptr) {
@@ -84,6 +92,14 @@ void Es8311AudioCodec::UpdateDeviceState() {
             .sample_rate = (uint32_t)input_sample_rate_,
             .mclk_multiple = 0,
         };
+        //开启AEC
+        #if CONFIG_USE_DEVICE_AEC
+        if (input_reference_) {
+            fs.channel = input_channels_;
+            fs.channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1);
+        }
+        #endif
+
         ESP_ERROR_CHECK(esp_codec_dev_open(dev_, &fs));
         ESP_ERROR_CHECK(esp_codec_dev_set_in_gain(dev_, input_gain_));
         ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(dev_, output_volume_));
@@ -171,6 +187,7 @@ void Es8311AudioCodec::EnableInput(bool enable) {
     if (enable == input_enabled_) {
         return;
     }
+    ESP_LOGI(TAG, "Input %s", enable ? "enabled" : "disabled");
     AudioCodec::EnableInput(enable);
     UpdateDeviceState();
 }
@@ -183,6 +200,7 @@ void Es8311AudioCodec::EnableOutput(bool enable) {
     if (enable == output_enabled_) {
         return;
     }
+    ESP_LOGI(TAG, "Output %s", enable ? "enabled" : "disabled");
     AudioCodec::EnableOutput(enable);
     UpdateDeviceState();
 }
@@ -190,13 +208,37 @@ void Es8311AudioCodec::EnableOutput(bool enable) {
 int Es8311AudioCodec::Read(int16_t* dest, int samples) {
     if (input_enabled_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(dev_, (void*)dest, samples * sizeof(int16_t)));
+        // 如果是双通道，可能需要处理数据以分离麦克风输入和参考信号
+        if (input_reference_ && input_channels_ == 2) {
+            // 数据格式是 [mic0, ref0, mic1, ref1, ...]
+            // 如果只需要麦克风数据，可以提取奇数索引的数据
+            // 或者保持原样让AFE处理器处理
+        }
     }
     return samples;
 }
 
 int Es8311AudioCodec::Write(const int16_t* data, int samples) {
     if (output_enabled_) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(dev_, (void*)data, samples * sizeof(int16_t)));
+        #if CONFIG_USE_DEVICE_AEC   // 是否使用回声消除
+        if (input_reference_ && input_channels_ == 2) {
+            // 需要将单通道数据转换为双通道格式
+            stereo_buffer_.resize(samples * 2);
+
+            // 转换单通道到双通道
+            for (int i = 0; i < samples; i++) {
+                stereo_buffer_[i * 2] = data[i];     // 左声道
+                stereo_buffer_[i * 2 + 1] = data[i]; // 右声道（重复相同数据）
+            }
+
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(dev_,
+                                         (void *)stereo_buffer_.data(),
+                                         stereo_buffer_.size() * sizeof(int16_t)));
+        } 
+        
+        #else 
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(dev_, (void *)data, samples * sizeof(int16_t)));
+        #endif
     }
     return samples;
 }
