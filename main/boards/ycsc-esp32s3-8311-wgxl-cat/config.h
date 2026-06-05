@@ -40,13 +40,13 @@ typedef enum {
 
 
 /*酱酒猫*/
-// #define DISPLAY_DC_PIN     GPIO_NUM_11
-// #define DISPLAY_CS_PIN     GPIO_NUM_12
-// #define DISPLAY_CLK_PIN    GPIO_NUM_13
-// #define DISPLAY_MOSI_PIN   GPIO_NUM_14
+#define DISPLAY_DC_PIN     GPIO_NUM_11
+#define DISPLAY_CS_PIN     GPIO_NUM_12
+#define DISPLAY_CLK_PIN    GPIO_NUM_13
+#define DISPLAY_MOSI_PIN   GPIO_NUM_14
 
-// #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_15
-// #define DISPLAY_RST_PIN       GPIO_NUM_21
+#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_15
+#define DISPLAY_RST_PIN       GPIO_NUM_21
 
 // #define DISPLAY_DC_PIN     GPIO_NUM_4
 // #define DISPLAY_CS_PIN     GPIO_NUM_5
@@ -57,13 +57,13 @@ typedef enum {
 // #define DISPLAY_RST_PIN       GPIO_NUM_8
 
 
-#define DISPLAY_DC_PIN     GPIO_NUM_41
-#define DISPLAY_CS_PIN     GPIO_NUM_42
-#define DISPLAY_CLK_PIN    GPIO_NUM_40
-#define DISPLAY_MOSI_PIN   GPIO_NUM_45
+// #define DISPLAY_DC_PIN     GPIO_NUM_41
+// #define DISPLAY_CS_PIN     GPIO_NUM_42
+// #define DISPLAY_CLK_PIN    GPIO_NUM_40
+// #define DISPLAY_MOSI_PIN   GPIO_NUM_45
 
-#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_46
-#define DISPLAY_RST_PIN       GPIO_NUM_39
+// #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_46
+// #define DISPLAY_RST_PIN       GPIO_NUM_39
 
 // 电池
 #define LOW_BATTERY_ALARM_LEVEL 20      //低电量报警阈值
@@ -252,10 +252,10 @@ typedef enum {
 #define DISPLAY_MIRROR_X true
 #define DISPLAY_MIRROR_Y true
 #define DISPLAY_SWAP_XY false
-#define DISPLAY_INVERT_COLOR  false
+#define DISPLAY_INVERT_COLOR  true
 #define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_BGR
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  32
+#define DISPLAY_OFFSET_X  2
+#define DISPLAY_OFFSET_Y  0
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 #define DISPLAY_SPI_MODE 0
 #endif

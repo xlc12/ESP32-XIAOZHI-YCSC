@@ -67,6 +67,8 @@ choice BOARD_TYPE
     config BOARD_TYPE_YCSC_ESP32S3_8311_WGXL_CAT
         bool "Ycsc Esp32s3 8311酱酒猫"
         depends on IDF_TARGET_ESP32S3
+        select LV_USE_GIF
+        select LV_GIF_CACHE_DECODE_DATA
     config BOARD_TYPE_BREAD_COMPACT_WIFI
         bool "面包板新版接线（WiFi）"
         depends on IDF_TARGET_ESP32S3
