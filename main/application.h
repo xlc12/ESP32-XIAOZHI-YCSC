@@ -17,6 +17,18 @@
 #include "device_state_event.h"
 
 
+// add by xlc-mqtt -begin
+#define ENB_MQTT_CALLBACK
+
+#ifdef ENB_MQTT_CALLBACK
+// 直接包含MQTT数据头文件
+#include "app_mq_data.h"
+#endif
+
+#define ENB_MQTT_CALLBACK
+// add by xlc -end
+
+
 #define MAIN_EVENT_SCHEDULE (1 << 0)
 #define MAIN_EVENT_SEND_AUDIO (1 << 1)
 #define MAIN_EVENT_WAKE_WORD_DETECTED (1 << 2)
@@ -63,6 +75,33 @@ public:
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
 
+// add by xlc-mqtt -begin
+#ifdef ENB_MQTT_CALLBACK
+    // MQTT命令处理函数声明
+    bool check_mac_address(const char* mac,int cmd, int serial);
+    void HandleMqttCommand(int cmd, const command_header_t* header, const void* command_data);
+    void On_timer_alarm(const char* timer_id, const char* task, uint32_t timestamp);
+    void PlaySuccessSound();
+    void PlayFailureSound();
+    void PlaySoundByType(int type);  // 或者使用枚举类型
+
+    // 如果使用枚举，还需要定义枚举类型
+    enum SoundType {
+        SOUND_SUCCESS,
+        SOUND_FAILURE,
+        SOUND_WARNING,
+        SOUND_NOTIFICATION
+    };
+
+#endif
+
+#ifdef ENB_PALY_TTS
+    // 添加这个简单的方法
+    // void PlayTTS(const std::string& text);
+#endif
+
+// add by xlc -end
+
 private:
     Application();
     ~Application();
@@ -88,6 +127,18 @@ private:
     void CheckNewVersion(Ota& ota);
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
+
+    // add by xlc-mqtt -begin
+    bool init_device_mqtt_cloud_connection(Ota& ota); // 初始化设备mqtt云连接
+
+#ifdef ENB_MQTT_CALLBACK
+    // MQTT命令处理的静态包装函数
+    static void StaticHandleMqttCommand(int cmd, const command_header_t* header, const void* command_data);
+    // 定时器回调的静态包装函数
+    static void StaticOn_timer_alarm(const char* timer_id, const char* task, uint32_t timestamp);
+#endif
+
+    // add by xlc -end
 };
 
 

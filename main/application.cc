@@ -14,6 +14,16 @@
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 #include <font_awesome.h>
+#include "settings.h"
+
+// add by xlc-mqtt -begin
+//app_mqtt5
+#include "app_timer_manager.h"
+#include "app_mqtt5.h"
+#include "app_aes.h"
+#include <esp_mac.h>
+#define ENB_APPL_BROAD
+// add by xlc -end
 
 #define TAG "Application"
 
@@ -77,6 +87,11 @@ void Application::CheckNewVersion(Ota& ota) {
         SetDeviceState(kDeviceStateActivating);
         auto display = board.GetDisplay();
         display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
+
+        //add by xlc-mqtt -begin
+        // 初始化设备mqtt云连接
+        init_device_mqtt_cloud_connection(ota);
+        // add by xlc -end
 
         if (!ota.CheckVersion()) {
             retry_count++;
@@ -331,6 +346,19 @@ void Application::Start() {
 
     /* Setup the display */
     auto display = board.GetDisplay();
+
+// add by xlc-mqtt -begin
+#ifdef ENB_MQTT_CALLBACK
+// 初始化定时器管理器
+    app_timer_manager_init();
+    app_timer_manager_set_callback(Application::StaticOn_timer_alarm);
+    ESP_LOGI(TAG, "Timer manager initialized with alarm callback");
+
+    // 注册MQTT命令回调函数
+    app_mq_data_set_command_callback(Application::StaticHandleMqttCommand);
+    ESP_LOGI(TAG, "MQTT command callback registered");
+#endif
+// add by xlc -end
 
     // Print board name/version info
     display->SetChatMessage("system", SystemInfo::GetUserAgent().c_str());
@@ -791,3 +819,584 @@ void Application::SetAecMode(AecMode mode) {
 void Application::PlaySound(const std::string_view& sound) {
     audio_service_.PlaySound(sound);
 }
+
+
+// add by xlc-mqtt -begin
+bool Application::init_device_mqtt_cloud_connection(Ota& ota) {
+
+    
+    // #ifdef ENB_OTA_LUMA_FUNC
+    #if 1
+
+    #if 0//old test
+                        bool result = ota.DeviceRegister("84f7037f19c1", "1982827294154412034", 1);
+                        if (result) {
+                            app_mqtt5_set_cfg("wifi_84f7037f19c1_1982827294154412034", "84f7037f19c1", "TA2sfFcSaQT9xCFzYKjOtxGg4Z0Wc9SenduW1ZJVyYDFyuCGM6+EU8e+yQPElGCm", "1982827294154412034");
+                            test_app_mqtt5();
+                        }
+    #else//真实
+                        // 使用默认URL注册
+                        #define PK_20251105_STR     "5u5PgufMY/tuZ5wl1uflbA=="// 2025-11-05//lin new pk1105_bA__
+                        #define base64_key PK_20251105_STR
+                        #define C_DEVICE_TYEP 1
+                        char *test2_plaintext = NULL;//"wifi_84f7037f19c1_1982827294154412034";
+                        const char *expected_base64_2 = "TA2sfFcSaQT9xCFzYKjOtxGg4Z0Wc9SenduW1ZJVyYDFyuCGM6+EU8e+yQPElGCm";
+
+                        char client_id[52];//13+33+2+4=52
+                        char username[13];//device_id
+                        char password[65];
+                        char uuid[33];//uuid
+                        
+                        uint8_t mac[6];
+                        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+                        snprintf(username, sizeof(username), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+
+                        //snprintf(username, sizeof(username), "%s", "84f7037f19c1");//SystemInfo::GetMacAddress().c_str());
+                        //char ota_url[128];
+                        memset(uuid, 0, sizeof(uuid));
+                        // blufi_storage_read_app_uuid(uuid);
+                        Settings settings("blufi", false);
+                        std::string uuid_str = settings.GetString("blufi_app_uuid");//读APP UUID到内存中
+                        strlcpy(uuid, uuid_str.c_str(), sizeof(uuid));
+                        if (strlen(uuid) == 0){
+                            ESP_LOGE(TAG, "uuid is empty, use default uuid\n");
+                            snprintf(uuid, sizeof(uuid), "%s", "1982827294154412034");//TODOSystemInfo::GetUniqueId().c_str());
+                        }
+                        snprintf(client_id, sizeof(client_id), "wifi_%s_%s", username, uuid);
+                        bool result = ota.DeviceRegister(username, uuid, C_DEVICE_TYEP);
+                        if (result) {
+                            ESP_LOGW("MAIN", "Device registration successful");
+                        } else {
+                            ESP_LOGE("MAIN", "Device registration failed");
+                        }
+
+
+                        test2_plaintext = client_id;
+
+                        if (result) {
+                            // 测试用例2：您提供的新测试用例
+                                ESP_LOGD(TAG,"\n=== 测试用例2 ===\n");
+                                ESP_LOGD(TAG,"明文: %s\n", test2_plaintext);
+                                ESP_LOGD(TAG,"期望Base64: %s\n", expected_base64_2);
+                                
+                                // 加密
+                                char *actual_base64_2 = java_aes_encrypt_to_base64(test2_plaintext, base64_key);
+                                if (actual_base64_2) {
+                                    ESP_LOGD(TAG,"实际Base64: %s\n", actual_base64_2);
+                                    
+                                    if (strcmp(actual_base64_2, expected_base64_2) == 0) {
+                                        ESP_LOGD(TAG,"✓ 加密结果匹配！\n");
+                                    } else {
+                                        ESP_LOGD(TAG,"✗ 加密结果不匹配！\n");
+                                    }
+                                    
+                                    // 解密验证
+                                    #if 1
+                                    char *decrypted_2 = java_aes_decrypt_from_base64(actual_base64_2, base64_key);
+                                    if (decrypted_2) {
+                                        ESP_LOGD(TAG,"解密验证: %s\n", decrypted_2);
+                                        
+                                        if (strcmp(decrypted_2, test2_plaintext) == 0) {
+                                            //ESP_LOGD(TAG,"✓ 解密验证成功！\n");
+                                            ESP_LOGI(TAG,"✓ 解密验证成功！\n");
+                                        } else {
+                                            //ESP_LOGD(TAG,"✗ 解密验证失败！\n");
+                                            ESP_LOGW(TAG,"✗ 解密验证失败！\n");
+                                        }
+                                        strlcpy(password, actual_base64_2, sizeof(password));
+                                        free(decrypted_2);
+                                    }
+                                    #endif
+                                    
+                                    free(actual_base64_2);
+                                }
+                        }
+
+                        if (result) {
+                            //;app_mqtt5_set_cfg("wifi_84f7037f19c1_1982827294154412034", "84f7037f19c1", "TA2sfFcSaQT9xCFzYKjOtxGg4Z0Wc9SenduW1ZJVyYDFyuCGM6+EU8e+yQPElGCm", "1982827294154412034");
+                            app_mqtt5_set_cfg(client_id, username, password, uuid);
+                            char ssid[32];
+                            // 读取wifi ssid
+                            // blufi_storage_read_wifi_ssid(ssid);
+                            //get_device_status()->wifi_ssid = ssid;
+                            strlcpy(get_device_status()->wifi_ssid, ssid, sizeof(get_device_status()->wifi_ssid));
+                            test_app_mqtt5();
+                            
+                        }
+    #endif
+    #endif//ENB OTA_LUMA_FUNC
+    
+    return result;
+}
+// add by xlc -end
+
+
+
+/***************************  *****************************/
+
+
+
+// add by xlc-mqtt -begin
+#ifdef ENB_MQTT_CALLBACK
+// 简单版本 - 直接播放成功/失败音
+void Application::PlaySuccessSound()
+{
+    PlaySound(Lang::Sounds::OGG_SUCCESS);
+}
+
+void Application::PlayFailureSound()
+{
+    PlaySound(Lang::Sounds::OGG_EXCLAMATION);
+}
+
+// 带参数版本
+void Application::PlaySoundByType(int type)
+{
+    switch (type) {
+        case SOUND_SUCCESS:
+            PlaySound(Lang::Sounds::OGG_SUCCESS);
+            break;
+        case SOUND_FAILURE:
+            PlaySound(Lang::Sounds::OGG_EXCLAMATION);
+            break;
+        case SOUND_WARNING:
+            PlaySound(Lang::Sounds::OGG_LOW_BATTERY);
+            break;
+        case SOUND_NOTIFICATION:
+            PlaySound(Lang::Sounds::OGG_POPUP);
+            break;
+        default:
+            break;
+    }
+}
+// 静态包装函数实现
+void Application::StaticOn_timer_alarm(const char* timer_id, const char* task, uint32_t timestamp)
+{
+    Application::GetInstance().On_timer_alarm(timer_id, task, timestamp);
+}
+
+void Application::On_timer_alarm(const char* timer_id, const char* task, uint32_t timestamp)
+{
+    ESP_LOGI(TAG, "On_timer_alarm: %s, %s, %lu", timer_id, task, timestamp);
+    ESP_LOGW(TAG, "🎯 [闹钟到了！！！！]TIMER ALARM: %s - %s (timestamp: %lu)", timer_id, task, timestamp);
+    //;PlaySound(Lang::Sounds::P3_POPUP);
+    
+    if (task == NULL) {
+        // PlayTTS("唐老鸭的闹钟到了！！");
+    } else {
+        // PlayTTS(task);
+    }
+    
+    
+    
+    char* response = create_108_timer_reach_response_json(CMD_TIMER_REACH, timestamp);
+    if (response) {
+        app_mqtt5_dev2server(response);
+        free(response);
+        //;PlaySoundByType(SOUND_SUCCESS);
+    }
+}
+
+// 静态包装函数实现
+void Application::StaticHandleMqttCommand(int cmd, const command_header_t* header, const void* command_data)
+{
+    Application::GetInstance().HandleMqttCommand(cmd, header, command_data);
+}
+
+ bool Application::check_mac_address(const char* mac,int cmd, int serial) {
+        //;return true;//调试用
+
+        const char* current_device_id = app_mqtt5_get_device_id();
+
+        if (mac == NULL || strcmp(mac, current_device_id) != 0) {
+            ESP_LOGW(TAG, "MAC address mismatch: expected %s, got %s", 
+                    current_device_id, mac ? mac : "NULL");
+            char* failed_response = create_failed_response(cmd, serial, "MAC address mismatch");
+            if (failed_response) {
+                app_mqtt5_dev2app(failed_response);
+                free(failed_response);
+                PlaySoundByType(SOUND_FAILURE);
+            }
+            return false;
+        }
+        return true;
+    }
+// 实际的命令处理函数实现
+void Application::HandleMqttCommand(int cmd, const command_header_t* header, const void* command_data)
+{
+    ESP_LOGI(TAG, "Processing MQTT command: %d", cmd);
+    
+    const char* current_device_id = app_mqtt5_get_device_id();
+    if (current_device_id == NULL) {
+        ESP_LOGE(TAG, "Invalid device ID");
+        char* error_response = create_error_response(header->cmd, header->serial, "Invalid device ID");
+        if (error_response) {
+            app_mqtt5_dev2app(error_response);
+            free(error_response);
+            PlaySoundByType(SOUND_FAILURE);
+        }
+        return;
+    }
+
+    int ret;
+   
+    switch (cmd) {
+        case CMD_QUERY_DEVICE_INFO:  // 101 - 查询设备信息
+        {
+            const device_query_cmd_t* query_cmd = (const device_query_cmd_t*)command_data;
+            if (query_cmd == NULL) {
+                ESP_LOGE(TAG, "Query command data is NULL");
+                char* error_response = create_error_response(header->cmd, header->serial, "Invalid command data");
+                if (error_response) {
+                    app_mqtt5_dev2app(error_response);
+                    free(error_response);
+                    PlaySoundByType(SOUND_FAILURE);
+                }
+                break;
+            }
+            
+            if (check_mac_address(query_cmd->mac, header->cmd, header->serial)) {
+                ESP_LOGI(TAG, "Query device info for MAC: %s", query_cmd->mac);
+                //;report_device_info();
+                report_device_status();
+                PlaySoundByType(SOUND_SUCCESS);
+            }
+            break;
+        }
+            
+        case CMD_DEVICE_ONLINE:  // 103 - 删除设备
+        {
+            const device_query_cmd_t* online_cmd = (const device_query_cmd_t*)command_data;
+            if (online_cmd == NULL) {
+                ESP_LOGE(TAG, "Online command data is NULL");
+                char* error_response = create_error_response(header->cmd, header->serial, "Invalid command data");
+                if (error_response) {
+                    app_mqtt5_dev2app(error_response);
+                    free(error_response);
+                    PlaySoundByType(SOUND_FAILURE);
+                  
+                }
+                break;
+            }
+            
+            if (check_mac_address(online_cmd->mac, header->cmd, header->serial)) {
+                ESP_LOGI(TAG, "Device online notification for MAC: %s", online_cmd->mac);
+                // 发送上线应答
+                char* response = create_success_response(header->cmd, header->serial);
+                if (response) {
+                    app_mqtt5_dev2app(response);
+                    free(response);
+                    PlaySoundByType(SOUND_SUCCESS);
+
+                    ESP_LOGW(TAG, "Resetting WiFi configuration");
+                // Set a flag and reboot the device to enter the network configuration mode
+
+#ifdef ENB_MQTT_CALLBACK
+                    {
+                        //Settings settings("wifi", true);
+                        //settings.SetInt("force_ap", 1);
+                        //==================================blufi==================================
+                        // blufi_storage_write_has_config(false); 
+                        //==========================================================================
+                    }
+                    //GetDisplay()->ShowNotification(Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    // Reboot the device
+                    esp_restart();
+                }
+ #endif               
+                // 同时上报设备状态
+                vTaskDelay(pdMS_TO_TICKS(100));
+                //report_device_status();
+            }
+            break;
+        }
+            
+        case CMD_WIFI_CONFIG:  // 104 - WiFi配置
+        {
+            const wifi_config_cmd_t* wifi_cmd = (const wifi_config_cmd_t*)command_data;
+            if (wifi_cmd == NULL) {
+                ESP_LOGE(TAG, "WiFi config command data is NULL");
+                char* error_response = create_error_response(header->cmd, header->serial, "Invalid command data");
+                if (error_response) {
+                    app_mqtt5_dev2app(error_response);
+                    free(error_response);
+                    PlaySoundByType(SOUND_FAILURE);
+                }
+                break;
+            }
+            
+            if (check_mac_address(wifi_cmd->mac, header->cmd, header->serial)) {
+                ESP_LOGI(TAG, "WiFi config: SSID=%s, Password=%s",
+                        wifi_cmd->wifi_ssid, wifi_cmd->wifi_pwd);
+                int ret = 0;
+#ifdef ENB_MQTT_CALLBACK
+                // 这里实现WiFi配置逻辑
+                // TODO: 添加实际的WiFi配置代码
+                // 例如：保存WiFi配置到NVS，触发WiFi重连等
+                // ret = blufi_wifi_switch_connection(wifi_cmd->wifi_ssid, wifi_cmd->wifi_pwd);
+                // PlaySoundByType(SOUND_SUCCESS);
+#endif
+                if (0 != ret) {
+                    ESP_LOGE(TAG, "blufi_wifi_switch_connection failed");
+                    char* error_response = create_error_response(header->cmd, header->serial, "WiFi config failed");
+                    if (error_response) {
+                        app_mqtt5_dev2app(error_response);
+                        free(error_response);
+                        PlaySoundByType(SOUND_FAILURE);
+                    }
+                    break;
+                }
+               
+                // 更新设备状态中的WiFi SSID
+                strncpy(get_device_status()->wifi_ssid, wifi_cmd->wifi_ssid, 
+                       sizeof(get_device_status()->wifi_ssid) - 1);
+                
+                char* response = create_success_response(header->cmd, header->serial);
+                if (response) {
+                    app_mqtt5_dev2app(response);
+                    free(response);
+                    
+                }
+                
+                // 延迟上报新的设备状态
+                vTaskDelay(pdMS_TO_TICKS(200));
+                report_device_status();
+            }
+            break;
+        }
+            
+        case CMD_OTA_UPGRADE:  // 105 - OTA升级
+        {
+            const ota_upgrade_cmd_t* ota_cmd = (const ota_upgrade_cmd_t*)command_data;
+            if (ota_cmd == NULL) {
+                ESP_LOGE(TAG, "OTA command data is NULL");
+                char* error_response = create_error_response(header->cmd, header->serial, "Invalid command data");
+                if (error_response) {
+                    app_mqtt5_dev2app(error_response);
+                    free(error_response);
+                    PlaySoundByType(SOUND_FAILURE);
+                }
+                break;
+            }
+            
+            ESP_LOGI(TAG, "OTA upgrade: version=%s, url=%s, silence=%d", 
+                    ota_cmd->version, ota_cmd->upgrade_url, ota_cmd->is_silence);
+            
+            // 这里实现OTA升级逻辑
+            // TODO: 添加实际的OTA升级代码
+            // 例如：下载固件、校验、重启升级等
+            
+            // 立即响应OTA命令接收
+            char* response = create_success_response(header->cmd, header->serial);
+            if (response) {
+                app_mqtt5_dev2app(response);
+                free(response);
+                PlaySoundByType(SOUND_SUCCESS);
+            }
+            
+            // 开始OTA升级流程（在后台任务中执行）
+            // start_ota_upgrade(ota_cmd->upgrade_url, ota_cmd->version);
+            
+            break;
+        }
+            
+       case CMD_TIMER_SET:  // 107 - 定时器设置
+        {
+            const timer_set_cmd_t* timer_cmd = (const timer_set_cmd_t*)command_data;
+            if (timer_cmd == NULL) {
+                ESP_LOGE(TAG, "Timer set command data is NULL");
+                char* error_response = create_error_response(header->cmd, header->serial, "Invalid command data");
+                if (error_response) {
+                    app_mqtt5_dev2app(error_response);
+                    free(error_response);
+                    PlaySoundByType(SOUND_FAILURE);
+                }
+                break;
+            }
+            
+            ESP_LOGI(TAG, "Timer set: received %d timers", timer_cmd->timer_count);
+            
+            // 打印所有定时器信息
+            for (size_t i = 0; i < timer_cmd->timer_count; i++) {
+                const timer_item_t* timer = &timer_cmd->timers[i];
+                ESP_LOGI(TAG, "Timer[%d]: id=%s, timestamp=%lu, task=%s", 
+                        i, timer->id, timer->timestamp, timer->task);
+            }
+            
+            // 这里实现定时器设置逻辑
+            // TODO: 添加实际的定时器设置代码
+            // 例如：创建硬件定时器、保存定时任务到NVS等
+            
+        // 使用定时器管理器处理定时器
+            int result = app_timer_manager_add_timers(timer_cmd->timers, timer_cmd->timer_count);
+            if (result == 0) {
+                ESP_LOGI(TAG, "Timers added to manager successfully");
+                
+                // 打印当前定时器状态
+                app_timer_manager_print_status();
+                
+                char* response = create_success_response(header->cmd, header->serial);
+                if (response) {
+                    app_mqtt5_dev2app(response);
+                    free(response);
+                    PlaySoundByType(SOUND_SUCCESS);
+                }
+            } else {
+                ESP_LOGE(TAG, "Failed to add timers to manager");
+                char* response = create_failed_response(header->cmd, header->serial, "Failed to set timers");
+                if (response) {
+                    app_mqtt5_dev2app(response);
+                    free(response);
+                    PlaySoundByType(SOUND_FAILURE);
+                }
+            }
+            break;
+        }
+            
+        //case CMD_TIMER_REACH:  // 108 - 定时器到达
+        //    break;
+            
+        case CMD_DEVICE_CONTROL:  // 109 - 设备控制命令
+        {
+            const device_control_cmd_t* control_cmd = (const device_control_cmd_t*)command_data;
+            if (control_cmd == NULL) {
+                ESP_LOGE(TAG, "Control command data is NULL");
+                char* error_response = create_error_response(header->cmd, header->serial, "Invalid command data");
+                if (error_response) {
+                    app_mqtt5_dev2app(error_response);
+                    free(error_response);
+                    PlaySoundByType(SOUND_FAILURE);
+                }
+                break;
+            }
+            
+            if (!check_mac_address(control_cmd->mac, header->cmd, header->serial)) {
+                break;
+            }
+            
+            ESP_LOGI(TAG, "Control command: type=%d, value=%d", control_cmd->control_type, control_cmd->control_value);
+            
+            bool success = true;
+            const char* result_msg = "success";
+            
+            // 执行控制命令（直接更新状态）
+            switch (control_cmd->control_type) {
+                case CONTROL_TYPE_VOLUME:
+                    get_device_status()->volume = control_cmd->control_value;
+                    ESP_LOGI(TAG, "Volume set to: %d", control_cmd->control_value);
+#ifdef ENB_APPL_BROAD
+                    {
+                        auto &board = Board::GetInstance();
+                        board.SetPowerSaveMode(false);
+                        auto codec = board.GetAudioCodec();
+                        codec->SetOutputVolume(control_cmd->control_value);
+                        ESP_LOGW(TAG, "Set volume done");
+                    }
+#endif                    
+                    break;
+                       
+                case CONTROL_TYPE_BRIGHTNESS:
+                    get_device_status()->brightness = control_cmd->control_value;
+                    ESP_LOGI(TAG, "Brightness set to: %d", control_cmd->control_value);
+#ifdef ENB_APPL_BROAD
+                    {
+                        auto& board = Board::GetInstance();
+                        auto backlight = board.GetBacklight();
+                        backlight->SetBrightness(control_cmd->control_value, true);
+                        ESP_LOGW(TAG, "Set brightness done");
+                    }
+#endif                    
+                    break;
+                        
+                default:
+                    ESP_LOGE(TAG, "Unknown control type: %d", control_cmd->control_type);
+                    success = false;
+                    result_msg = "Unknown control type";
+                    break;
+            }
+            
+            // 立即发送命令应答
+            char* response;
+            if (success) {
+                response = create_success_response(header->cmd, header->serial);
+                PlaySoundByType(SOUND_SUCCESS);
+            } else {
+                response = create_failed_response(header->cmd, header->serial, result_msg);
+                PlaySoundByType(SOUND_FAILURE);
+            }
+            
+            if (response) {
+                app_mqtt5_dev2app(response);
+                free(response);
+                ESP_LOGI(TAG, "Command response sent immediately");
+            }
+            
+            // 命令执行成功后，延迟上报状态变化
+            if (success) {
+                vTaskDelay(pdMS_TO_TICKS(300));  // 延迟300ms避免冲突
+                report_device_status();
+                ESP_LOGI(TAG, "Status reported after command");
+            }
+            break;
+        }
+
+        case CMD_GET_DEVICE_LIST:  // 110 - 获取设备列表
+        {
+            ESP_LOGI(TAG, "CMD_110: Get device list command received");
+            
+            // 110命令不需要检查MAC地址，直接响应成功
+            char* response = create_success_response(header->cmd, header->serial);
+            if (response) {
+                app_mqtt5_dev2app(response);
+                free(response);
+                PlaySoundByType(SOUND_SUCCESS);
+            }
+            
+            // 根据文档说明，设备需要通过CMD-102上报当前状态
+            vTaskDelay(pdMS_TO_TICKS(200));
+            report_device_status();
+            
+            ESP_LOGI(TAG, "CMD_110: Response sent and status reported");
+            break;
+        }
+
+        default:
+        {
+            ESP_LOGW(TAG, "Unsupported command: %d", cmd);
+            
+            char* unsupported_response = create_failed_response(header->cmd, header->serial, "Unsupported command");
+            if (unsupported_response) {
+                app_mqtt5_dev2app(unsupported_response);
+                free(unsupported_response);
+                PlaySoundByType(SOUND_FAILURE);
+            }
+            break;
+        }
+    }
+}
+
+#endif//
+
+ 
+#ifdef ENB_PALY_TTS
+void Application::PlayTTS(const std::string& text) {
+//     if (protocol_ == nullptr) {
+//         ESP_LOGE(TAG, "Protocol is null, cannot play TTS");
+//         return;
+//     }
+    
+//     // 确保音频通道打开
+//     if (!protocol_->IsAudioChannelOpened()) {
+//         if (!protocol_->OpenAudioChannel()) {
+//             ESP_LOGE(TAG, "Failed to open audio channel for TTS");
+//             return;
+//         }
+//     }
+    
+//     protocol_->SendTextForTTS(text);
+//     ESP_LOGI(TAG, "TTS request sent: %s", text.c_str());
+// }
+#endif
+// add by xgy -end

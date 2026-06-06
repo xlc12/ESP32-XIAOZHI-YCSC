@@ -47,11 +47,23 @@ void WifiBoard::EnterWifiConfigMode()
                                {
         bool *is_got_ip = (bool *)arg;
         *is_got_ip = true; }, &is_got_ip);
+    
 
     uint8_t mac[6];
-    static char blufi_device_name[18];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    snprintf(blufi_device_name, sizeof(blufi_device_name), "DTXZ_%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    // static char blufi_device_name[18];
+    // snprintf(blufi_device_name, sizeof(blufi_device_name), "DTXZ_%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    
+    // add by xlc-mqtt -begin
+    #if 1//正式版 app sy0001
+    char blufi_device_name[18+2];
+    snprintf(blufi_device_name, sizeof(blufi_device_name), "SY_0001%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    #else//test 乐鑫官方app
+    char blufi_device_name[18+2];
+    strcpy(blufi_device_name, BLUFI_DEVICE_NAME);
+    #endif
+    // add by xlc -end
+
 
     blufi_wificfg_cbs_t cbs = {
         .sta_config_cb = [](const wifi_config_t *config, void *arg)
@@ -68,12 +80,23 @@ void WifiBoard::EnterWifiConfigMode()
                 ESP_LOGI(TAG, "ota_url: %s", url.c_str());
                 Settings settings("wifi", true);
                 settings.SetString("ota_url", url);
-            } }};
+            } 
+            else if (len >= 8 && strncmp((char *)data, "AT+UUID=", 8) == 0) {
+                std::string uuid_str(reinterpret_cast<const char*>(data+8), len-8);
+                ESP_LOGI(TAG, "解析到APP UUID: %s", uuid_str.c_str());
+                Settings settings("blufi", true);
+                settings.SetString("blufi_app_uuid", uuid_str);//保存APP UUID到内存中
+            } 
+            else {
+                ESP_LOGI(TAG, "接收到的自定义数据: %.*s", (int)len, data);
+            }
+        }
+    };
 
     auto &application = Application::GetInstance();
     application.SetDeviceState(kDeviceStateWifiConfiguring);
     static char mac_str[18];
-    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    snprintf(mac_str, sizeof(mac_str), "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     std::string msg = std::string(mac_str) + "\r\n" + "网络配置中";
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, msg.c_str(), "", Lang::Sounds::OGG_WIFICONFIG);
 

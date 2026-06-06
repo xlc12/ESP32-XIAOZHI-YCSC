@@ -12,6 +12,10 @@
 #include "esp_wifi_remote.h"
 #endif
 
+// add by xlc-mqtt -begin
+#include "app_mqtt5.h"
+// add by xlc -end
+
 #define TAG "SystemInfo"
 
 size_t SystemInfo::GetFlashSize() {
@@ -147,5 +151,5 @@ void SystemInfo::PrintTaskList() {
 void SystemInfo::PrintHeapStats() {
     int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     int min_free_sram = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-    ESP_LOGI(TAG, "free sram: %u minimal sram: %u", free_sram, min_free_sram);
+    ESP_LOGI(TAG, "free sram: %u minimal sram: %u [%s]", free_sram, min_free_sram, VER_MQTT5);
 }

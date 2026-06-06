@@ -19,6 +19,11 @@
 #include <sstream>
 #include <algorithm>
 
+// add by xlc-mqtt -begin
+#define M_ENB_OTA_DEBUG
+#define C_OTA_URL "https://xrobo.qiniuapi.com/v1/ota/"
+// add by xlc -end
+
 #define TAG "Ota"
 
 
@@ -44,7 +49,11 @@ std::string Ota::GetCheckVersionUrl() {
     Settings settings("wifi", false);
     std::string url = settings.GetString("ota_url");
     if (url.empty()) {
-        url = CONFIG_OTA_URL;
+        // url = CONFIG_OTA_URL;
+        // add by xlc-mqtt -begin
+        ESP_LOGE(TAG, "OTA URL is not properly set, use default: %s", C_OTA_URL);
+        url = C_OTA_URL;
+        // add by xlc -end
     }
     return url;
 }
@@ -81,8 +90,15 @@ bool Ota::CheckVersion() {
 
     std::string url = GetCheckVersionUrl();
     if (url.length() < 10) {
-        ESP_LOGE(TAG, "Check version URL is not properly set");
-        return false;
+        // add by xlc-mqtt -begin
+        #if 1//xgy_modi    
+            ESP_LOGW(TAG, "OTA URL1 is not properly set, use default: %s", C_OTA_URL);
+            url = C_OTA_URL;
+        #else
+            // add by xlc -end   
+            ESP_LOGE(TAG, "Check version URL is not properly set");
+            return false;
+        #endif
     }
 
     auto http = SetupHttp();
@@ -108,6 +124,12 @@ bool Ota::CheckVersion() {
     // Response: { "firmware": { "version": "1.0.0", "url": "http://" } }
     // Parse the JSON response and check if the version is newer
     // If it is, set has_new_version_ to true and store the new version and URL
+
+    // add by xlc-mqtt -begin
+    #ifdef M_ENB_OTA_DEBUG
+        ESP_LOGW(TAG, "%s", data.c_str());
+    #endif    
+    // add by xlc -end
     
     cJSON *root = cJSON_Parse(data.c_str());
     if (root == NULL) {
@@ -474,3 +496,137 @@ esp_err_t Ota::Activate() {
     ESP_LOGI(TAG, "Activation successful");
     return ESP_OK;
 }
+
+// add by xlc-mqtt -begin
+
+#ifdef ENB_OTA_LUMA_FUNC
+bool Ota::DeviceRegister(const std::string& mac, const std::string& uid, int deviceType)
+{
+    // 使用默认注册URL
+    return DeviceRegister(mac, uid, deviceType, "http://101.43.32.17:8095/device/provision");
+}
+
+bool Ota::DeviceRegister(const std::string& mac, const std::string& uid, int deviceType, const std::string& url)
+{
+    ESP_LOGI(TAG, "Starting device registration...");
+
+    auto http = std::unique_ptr<Http>(SetupHttp());
+    
+    // 构造JSON数据
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "mac", mac.c_str());
+    cJSON_AddStringToObject(root, "uid", uid.c_str());
+    cJSON_AddNumberToObject(root, "deviceType", deviceType);
+    
+    char *json_str = cJSON_PrintUnformatted(root);
+    std::string post_data = json_str;
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+
+    ESP_LOGI(TAG, "Registration data: %s", post_data.c_str());
+
+    ESP_LOGI(TAG, "=== HTTP Request Details ===");
+    ESP_LOGI(TAG, "URL: %s", url.c_str());
+    ESP_LOGI(TAG, "Method: POST");
+    ESP_LOGI(TAG, "Content-Type: application/json");
+    ESP_LOGI(TAG, "Content-Length: %d", post_data.length());
+
+    // 在移动之前记录长度，然后使用 std::move
+    int content_length = post_data.length();
+    http->SetContent(std::move(post_data));  // 现在使用 std::move
+
+    if (!http->Open("POST", url))
+    {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        return false;
+    }
+
+    auto status_code = http->GetStatusCode();
+    ESP_LOGI(TAG, "=== HTTP Response Details ===");
+    ESP_LOGI(TAG, "Status Code: %d", status_code);
+    
+    // 使用分块读取来避免 ReadAll() 的问题
+    std::string response;
+    char buffer[256];
+    int total_read = 0;
+    
+    while (true) {
+        int bytes_read = http->Read(buffer, sizeof(buffer) - 1);
+        if (bytes_read <= 0) {
+            break;
+        }
+        buffer[bytes_read] = '\0';
+        response.append(buffer, bytes_read);
+        total_read += bytes_read;
+        ESP_LOGI(TAG, "Read chunk: %d bytes, Total: %d", bytes_read, total_read);
+    }
+    
+    http->Close();
+
+    ESP_LOGI(TAG, "Final response - Status: %d, Total body length: %d", status_code, response.length());
+    
+    if (response.empty()) {
+        ESP_LOGE(TAG, "Empty response body");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Response body: %s", response.c_str());
+    
+    // 解析JSON响应
+    cJSON *response_root = cJSON_Parse(response.c_str());
+    if (response_root == NULL) {
+        ESP_LOGE(TAG, "Failed to parse JSON response");
+        return false;
+    }
+
+    bool success = false;
+    cJSON *code = cJSON_GetObjectItem(response_root, "code");
+    cJSON *msg = cJSON_GetObjectItem(response_root, "msg");
+    cJSON *data = cJSON_GetObjectItem(response_root, "data");
+    
+    if (cJSON_IsNumber(code) && code->valueint == 200) {
+        success = true;
+        
+        if (cJSON_IsObject(data)) {
+            cJSON *response_uid = cJSON_GetObjectItem(data, "uid");
+            cJSON *status = cJSON_GetObjectItem(data, "status");
+            cJSON *deviceCode = cJSON_GetObjectItem(data, "deviceCode");
+            cJSON *message = cJSON_GetObjectItem(data, "message");
+            cJSON *dk = cJSON_GetObjectItem(data, "dk");
+            
+            if (cJSON_IsString(response_uid)) {
+                register_uid_ = response_uid->valuestring;
+            }
+            if (cJSON_IsNumber(status)) {
+                register_status_ = status->valueint;
+            }
+            if (cJSON_IsString(deviceCode)) {
+                register_device_code_ = deviceCode->valuestring;
+            }
+            if (cJSON_IsString(message)) {
+                register_message_ = message->valuestring;
+            }
+            if (cJSON_IsString(dk)) {
+                register_dk_ = dk->valuestring;
+            }
+            
+            ESP_LOGI(TAG, "Registration successful with data");
+            ESP_LOGI(TAG, "UID: %s, Status: %d, DeviceCode: %s, Message: %s, DK: %s",
+                    register_uid_.c_str(), register_status_, register_device_code_.c_str(), 
+                    register_message_.c_str(), register_dk_.c_str());
+        }
+    } else {
+        success = false;
+        if (cJSON_IsString(msg)) {
+            register_error_msg_ = msg->valuestring;
+            ESP_LOGE(TAG, "Registration failed: %s", register_error_msg_.c_str());
+        }
+    }
+    
+    cJSON_Delete(response_root);
+    return success;
+}
+
+#endif//ENB LUMA_FUNC
+
+// add by xlc -end
