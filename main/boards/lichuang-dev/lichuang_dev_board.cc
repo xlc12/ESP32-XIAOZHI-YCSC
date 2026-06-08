@@ -38,10 +38,9 @@ public:
 
 class CustomAudioCodec : public BoxAudioCodec {
 private:
-    Pca9557* pca9557_;
 
 public:
-    CustomAudioCodec(i2c_master_bus_handle_t i2c_bus, Pca9557* pca9557) 
+    CustomAudioCodec(i2c_master_bus_handle_t i2c_bus) 
         : BoxAudioCodec(i2c_bus, 
                        AUDIO_INPUT_SAMPLE_RATE, 
                        AUDIO_OUTPUT_SAMPLE_RATE,
@@ -53,16 +52,23 @@ public:
                        GPIO_NUM_NC, 
                        AUDIO_CODEC_ES8311_ADDR, 
                        AUDIO_CODEC_ES7210_ADDR, 
-                       AUDIO_INPUT_REFERENCE),
-          pca9557_(pca9557) {
+                       AUDIO_INPUT_REFERENCE) {
     }
 
     virtual void EnableOutput(bool enable) override {
         BoxAudioCodec::EnableOutput(enable);
         if (enable) {
-            pca9557_->SetOutputState(1, 1);
+            // pca9557_->SetOutputState(1, 1);
+            //设置IO48为输出模式
+            gpio_set_direction(AUDIO_CODEC_PA_PIN, GPIO_MODE_OUTPUT);
+            //设置IO48输出为高电平，使能音频输出
+            gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
         } else {
-            pca9557_->SetOutputState(1, 0);
+            // pca9557_->SetOutputState(1, 0);
+            //设置IO48为输入模式
+            gpio_set_direction(AUDIO_CODEC_PA_PIN, GPIO_MODE_INPUT);
+            //设置IO48输出为低电平，使能音频输出
+            gpio_set_level(AUDIO_CODEC_PA_PIN, 0);
         }
     }
 };
@@ -73,7 +79,7 @@ private:
     i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
     LcdDisplay* display_;
-    Pca9557* pca9557_;
+    // Pca9557* pca9557_;
     Esp32Camera* camera_;
 
     void InitializeI2c() {
@@ -93,7 +99,7 @@ private:
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
 
         // Initialize PCA9557
-        pca9557_ = new Pca9557(i2c_bus_, 0x19);
+        // pca9557_ = new Pca9557(i2c_bus_, 0x19);
     }
 
     void InitializeSpi() {
@@ -150,7 +156,7 @@ private:
         ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel));
         
         esp_lcd_panel_reset(panel);
-        pca9557_->SetOutputState(0, 0);
+        // pca9557_->SetOutputState(0, 0);
 
         esp_lcd_panel_init(panel);
         esp_lcd_panel_invert_color(panel, true);
@@ -206,7 +212,7 @@ private:
 
     void InitializeCamera() {
         // Open camera power
-        pca9557_->SetOutputState(2, 0);
+        // pca9557_->SetOutputState(2, 0);
 
         camera_config_t config = {};
         config.ledc_channel = LEDC_CHANNEL_2;  // LEDC通道选择  用于生成XCLK时钟 但是S3不用
@@ -246,15 +252,15 @@ public:
         InitializeSt7789Display();
         InitializeTouch();
         InitializeButtons();
-        InitializeCamera();
+        // InitializeCamera();
 
         GetBacklight()->RestoreBrightness();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
         static CustomAudioCodec audio_codec(
-            i2c_bus_, 
-            pca9557_);
+            i2c_bus_
+            );
         return &audio_codec;
     }
 
