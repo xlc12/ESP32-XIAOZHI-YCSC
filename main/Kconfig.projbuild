@@ -543,6 +543,10 @@ config AUDIO_DEBUG_UDP_SERVER
     depends on USE_AUDIO_DEBUGGER
     help
         UDP服务器地址，格式: IP:PORT，用于接收音频调试数据
+        
+config USE_BLUFI_NET_CONFIGURING
+    select BLUFI_WIFICFG_ENABLED
+    bool "Blufi"
 
 config RECEIVE_CUSTOM_MESSAGE
     bool "Enable Custom Message Reception"
