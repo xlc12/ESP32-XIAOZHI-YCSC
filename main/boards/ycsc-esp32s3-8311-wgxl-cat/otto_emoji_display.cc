@@ -66,11 +66,19 @@ OttoEmojiDisplay::OttoEmojiDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_p
     : SpiLcdDisplay(panel_io, panel, width, height, offset_x, offset_y, mirror_x, mirror_y, swap_xy,
                     fonts),
       emotion_gif_(nullptr) {
+    // 立即隐藏父类创建的状态栏，避免在SetupGifContainer执行前闪现
+    lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
     SetupGifContainer();
 };
 
 void OttoEmojiDisplay::SetupGifContainer() {
     DisplayLockGuard lock(this);
+
+    // 立即删除状态栏（父类构造函数中已创建），UpdateStatusBar已重写为空操作
+    if (status_bar_) {
+        lv_obj_del(status_bar_);
+        status_bar_ = nullptr;
+    }
 
     if (emotion_label_) {
         lv_obj_del(emotion_label_);
@@ -105,19 +113,7 @@ void OttoEmojiDisplay::SetupGifContainer() {
     lv_obj_center(emotion_gif_);
     lv_gif_set_src(emotion_gif_, &FaCai_1_2);
 
-    chat_message_label_ = lv_label_create(content_);
-    lv_label_set_text(chat_message_label_, "");
-    lv_obj_set_width(chat_message_label_, LV_HOR_RES * 0.9);
-    lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(chat_message_label_, lv_color_white(), 0);
-    lv_obj_set_style_border_width(chat_message_label_, 0, 0);
-
-    lv_obj_set_style_bg_opa(chat_message_label_, LV_OPA_70, 0);
-    lv_obj_set_style_bg_color(chat_message_label_, lv_color_black(), 0);
-    lv_obj_set_style_pad_ver(chat_message_label_, 5, 0);
-
-    lv_obj_align(chat_message_label_, LV_ALIGN_BOTTOM_MID, 0, 0);
+    chat_message_label_ = nullptr;
 
     LcdDisplay::SetTheme("dark");
 }
@@ -142,25 +138,13 @@ void OttoEmojiDisplay::SetEmotion(const char* emotion) {
 }
 
 void OttoEmojiDisplay::SetChatMessage(const char* role, const char* content) {
-    DisplayLockGuard lock(this);
-    if (chat_message_label_ == nullptr) {
-        return;
-    }
-
-    if (content == nullptr || strlen(content) == 0) {
-        lv_obj_add_flag(chat_message_label_, LV_OBJ_FLAG_HIDDEN);
-        return;
-    }
-
-    lv_label_set_text(chat_message_label_, content);
-    lv_obj_remove_flag(chat_message_label_, LV_OBJ_FLAG_HIDDEN);
-
-    ESP_LOGI(TAG, "设置聊天消息 [%s]: %s", role, content);
+    // 仅显示表情，不显示任何文字
+    return;
 }
 
 void OttoEmojiDisplay::SetIcon(const char* icon) {
     if (!icon) {
-        return;
+    return;
     }
 
     DisplayLockGuard lock(this);

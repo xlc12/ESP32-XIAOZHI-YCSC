@@ -41,6 +41,9 @@ public:
     // 添加SetIcon方法声明
     virtual void SetIcon(const char* icon) override;
 
+    // 不需要状态栏，重写为空操作
+    virtual void UpdateStatusBar(bool update_all = false) override {}
+
 private:
     void SetupGifContainer();
 

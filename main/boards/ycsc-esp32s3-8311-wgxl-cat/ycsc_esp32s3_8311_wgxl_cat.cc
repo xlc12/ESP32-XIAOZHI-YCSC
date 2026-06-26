@@ -306,7 +306,7 @@ private:
 
     //省电管理
     void InitializePowerSaveTimer() {
-        power_save_timer_ = new PowerSaveTimer(-1, 10, 300);
+        power_save_timer_ = new PowerSaveTimer(-1, 20, 300);
         power_save_timer_->OnEnterSleepMode([this]() {
 
             auto display = GetDisplay();
@@ -404,7 +404,7 @@ public:
         InitializePowerManager();
         InitializeMotor();
 
-        //开机后自动进入低功耗模式
+
         GetBacklight()->RestoreBrightness();
 
         
