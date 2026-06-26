@@ -28,6 +28,8 @@
 #include "power_manager.h"
 #include "power_save_timer.h"
 
+#include "touch_element/touch_button.h"
+
 
 #if defined(LCD_TYPE_ILI9341_SERIAL)
 #include "esp_lcd_ili9341.h"
@@ -38,8 +40,6 @@
 
 LV_FONT_DECLARE(font_puhui_16_4);
 LV_FONT_DECLARE(font_awesome_16_4);
-
-
 class YcscEsp32S3Es8311WgxlCat : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
@@ -57,6 +57,84 @@ private:
         board->MotorStop();
     }
 
+    /****** 添加ESP32S3触摸,GPIO9 --begin ******/
+    // 触摸按键句柄
+    static touch_button_handle_t touch_btn;
+
+    static void touch_event_cb(touch_button_handle_t btn, touch_button_message_t *msg, void *arg)
+    {
+        switch(msg->event)
+        {
+            case TOUCH_BUTTON_EVT_ON_PRESS:
+                printf("触摸按下\n");
+                break;
+            case TOUCH_BUTTON_EVT_ON_RELEASE:
+                printf("触摸松开\n");
+                break;
+            case TOUCH_BUTTON_EVT_ON_LONGPRESS:
+                printf("长按触发\n");
+                break;
+            default:
+                break;
+        }
+    }
+
+
+    /**
+     * @brief 初始化触摸按键 (GPIO9 / TOUCH_PAD_NUM9)
+     * 
+     * 调用顺序:
+     *   1. touch_element_install()     - 安装全局触摸元素驱动
+     *   2. touch_button_install()      - 安装按键子模块，设置阈值分压和默认长按时间
+     *   3. touch_button_create()       - 创建单个触摸按键实例，指定通道和灵敏度
+     *   4. touch_button_set_longpress()- 设置该按键的长按触发时长(ms)
+     *   5. touch_button_subscribe_event()- 订阅事件类型(按下/松开/长按)
+     *   6. touch_button_set_dispatch_method()- 设置为回调模式(必须!默认是事件队列模式)
+     *   7. touch_button_set_callback() - 绑定回调函数
+     *   8. touch_element_start()       - 启动触摸处理
+     * 
+     * 灵敏度说明:
+     *   - threshold_divider: 阈值分压系数(0~1), 越小越灵敏, 隔塑料可降到0.5
+     *   - channel_sens: 通道灵敏度(0~1), 越小越灵敏, 隔塑料可降到0.1~0.2
+     */
+    void InitializeTouch()
+    {
+        // 1. 全局触摸配置并安装
+        touch_elem_global_config_t global_cfg = TOUCH_ELEM_GLOBAL_DEFAULT_CONFIG();
+        touch_element_install(&global_cfg);
+
+        // 2. 触摸按键模块初始化 (threshold_divider越小越灵敏)
+        touch_button_global_config_t btn_global_cfg = {
+            .threshold_divider = 0.5,   // 阈值分压系数(默认0.8, 降低以适配塑料外壳)
+            .default_lp_time = 1000,    // 默认长按时间1000ms
+        };
+        touch_button_install(&btn_global_cfg);
+
+        // 3. 创建触摸按键实例 (channel_sens越小越灵敏)
+        touch_button_config_t btn_cfg = {
+            .channel_num = TOUCH_PAD_NUM9,  // GPIO9 对应触摸通道9
+            .channel_sens = 0.2,            // 灵敏度0.2 (默认0.5, 降低以适配塑料外壳)
+        };
+        touch_button_create(&btn_cfg, &touch_btn);
+
+        // 4. 设置长按触发时间为1000ms
+        touch_button_set_longpress(touch_btn, 1000);
+
+        // 5. 订阅事件: 按下、松开、长按
+        touch_button_subscribe_event(touch_btn,
+            TOUCH_ELEM_EVENT_ON_PRESS | TOUCH_ELEM_EVENT_ON_RELEASE | TOUCH_ELEM_EVENT_ON_LONGPRESS,
+            NULL);
+
+        // 6. 设置为回调模式 (重要! 默认是事件队列模式, 不设置回调不会触发)
+        touch_button_set_dispatch_method(touch_btn, TOUCH_ELEM_DISP_CALLBACK);
+
+        // 7. 绑定触摸事件回调函数
+        touch_button_set_callback(touch_btn, touch_event_cb);
+
+        // 8. 启动触摸处理
+        touch_element_start();
+    }
+    
     void InitializeI2c() {
         // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -174,6 +252,8 @@ private:
        esp_lcd_panel_mirror(panel, false,true);  // 水平镜像
        vTaskDelay(pdMS_TO_TICKS(50));
        gpio_set_level(DISPLAY_CS_PIN, 0);
+
+       InitializeTouch();
                             
        //xlc add -end     
 
@@ -357,5 +437,7 @@ public:
     }
 
 };
+
+touch_button_handle_t YcscEsp32S3Es8311WgxlCat::touch_btn = nullptr;
 
 DECLARE_BOARD(YcscEsp32S3Es8311WgxlCat);
