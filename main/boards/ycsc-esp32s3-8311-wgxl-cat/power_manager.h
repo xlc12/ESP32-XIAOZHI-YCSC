@@ -7,6 +7,7 @@
 #include <esp_timer.h>
 #include "config.h"
 #include "mcp_server.h"
+#include "device_state.h"
 
 /*
 待机状态下
@@ -57,6 +58,10 @@ private:
 
     void CheckBatteryStatus() {
         auto& app = Application::GetInstance();
+        // 应用未完成初始化时不播放声音，避免 AudioService 未就绪导致 crash
+        if (app.GetDeviceState() == kDeviceStateUnknown || app.GetDeviceState() == kDeviceStateStarting) {
+            return;
+        }
         static uint32_t last_low_battery_time_ = 0; // 电池电量过低的最后时间点
         static uint32_t last_charging_complete_time_ = 0; // 电池充电完成的最后时间点
         static uint32_t last_start_charging_flag = 0; //开始充电标志位

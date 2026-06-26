@@ -11,6 +11,8 @@ LV_IMG_DECLARE(FaCai_1_2);
 LV_IMG_DECLARE(Listen_1_3);
 LV_IMG_DECLARE(Speak_1_4);
 LV_IMG_DECLARE(Sleep_1_5);
+LV_IMG_DECLARE(wait_1_6);
+
 
 
 

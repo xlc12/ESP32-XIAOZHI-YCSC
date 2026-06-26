@@ -63,17 +63,28 @@ private:
 
     static void touch_event_cb(touch_button_handle_t btn, touch_button_message_t *msg, void *arg)
     {
+        YcscEsp32S3Es8311WgxlCat* board = static_cast<YcscEsp32S3Es8311WgxlCat*>(arg);
+        auto& app = Application::GetInstance();
+
         switch(msg->event)
         {
             case TOUCH_BUTTON_EVT_ON_PRESS:
                 printf("触摸按下\n");
+                ESP_LOGI(TAG, "触摸按下, 切换对话状态");
+                app.ToggleChatState();
                 break;
             case TOUCH_BUTTON_EVT_ON_RELEASE:
                 printf("触摸松开\n");
                 break;
-            case TOUCH_BUTTON_EVT_ON_LONGPRESS:
+            case TOUCH_BUTTON_EVT_ON_LONGPRESS: {
                 printf("长按触发\n");
+                if (app.GetDeviceState() == kDeviceStateStarting) {
+                    board->ResetWifiConfiguration();
+                    ESP_LOGE(TAG, "长按触发配网重置");
+                    return;
+                }
                 break;
+            }
             default:
                 break;
         }
@@ -123,7 +134,7 @@ private:
         // 5. 订阅事件: 按下、松开、长按
         touch_button_subscribe_event(touch_btn,
             TOUCH_ELEM_EVENT_ON_PRESS | TOUCH_ELEM_EVENT_ON_RELEASE | TOUCH_ELEM_EVENT_ON_LONGPRESS,
-            NULL);
+            this);
 
         // 6. 设置为回调模式 (重要! 默认是事件队列模式, 不设置回调不会触发)
         touch_button_set_dispatch_method(touch_btn, TOUCH_ELEM_DISP_CALLBACK);
@@ -267,6 +278,9 @@ private:
             "指到谁谁喝酒，当听到转圈、指到谁谁喝酒时执行该操作; ",
             PropertyList(),
             [this](const PropertyList& properties) -> ReturnValue {
+
+                auto display = GetDisplay();
+                display->SetEmotion("FaCai_1_2");
                 //随机转动时间，范围在1-5秒之间
                 int time = rand() % 15 + 3;
                 //正转反转随机1或2：MOTOR_FORWARD、MOTOR_BACKWARD
@@ -303,7 +317,7 @@ private:
         });
         power_save_timer_->OnExitSleepMode([this]() {
             auto display = GetDisplay();
-            display->SetEmotion("FaCai_1_2");
+            display->SetEmotion("wait_1_6");
             ESP_LOGI(TAG, "省电管理： 关闭");
         });
         power_save_timer_->OnShutdownRequest([this]() {
@@ -393,7 +407,7 @@ public:
         //开机后自动进入低功耗模式
         GetBacklight()->RestoreBrightness();
 
-        InitializePowerSaveTimer();
+        
         
         //开机正转1秒，反转1秒，停止
         MotorControl(MOTOR_FORWARD, 2000);
@@ -401,6 +415,11 @@ public:
         MotorControl(MOTOR_BACKWARD, 2000);
         vTaskDelay(pdMS_TO_TICKS(2000));
         MotorControl(MOTOR_STOP, 0);
+
+        //延时10秒，等待省电管理初始化完成
+        vTaskDelay(pdMS_TO_TICKS(1));
+        
+        InitializePowerSaveTimer();
 
         
 

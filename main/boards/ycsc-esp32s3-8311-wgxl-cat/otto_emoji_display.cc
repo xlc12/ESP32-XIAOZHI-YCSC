@@ -19,6 +19,7 @@ const OttoEmojiDisplay::EmotionMap OttoEmojiDisplay::emotion_maps_[] = {
     {"Listen_1_3", &Listen_1_3},
     {"Speak_1_4", &Speak_1_4},
     {"Sleep_1_5", &Sleep_1_5},
+    {"wait_1_6", &wait_1_6},
 
 
 
