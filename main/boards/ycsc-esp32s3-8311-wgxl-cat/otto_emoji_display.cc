@@ -68,6 +68,10 @@ OttoEmojiDisplay::OttoEmojiDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_p
       emotion_gif_(nullptr) {
     // 立即隐藏父类创建的状态栏，避免在SetupGifContainer执行前闪现
     lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+    //隐藏表情标签
+    lv_obj_add_flag(content_, LV_OBJ_FLAG_HIDDEN);
+    //隐藏表情GIF
+    lv_obj_add_flag(chat_message_label_, LV_OBJ_FLAG_HIDDEN);
     SetupGifContainer();
 };
 
@@ -78,17 +82,29 @@ void OttoEmojiDisplay::SetupGifContainer() {
     if (status_bar_) {
         lv_obj_del(status_bar_);
         status_bar_ = nullptr;
+        // status_bar_ 的删除会递归删除其所有子对象，必须将相关指针置空防止悬空指针
+        status_label_ = nullptr;
+        notification_label_ = nullptr;
+        emotion_label_ = nullptr;
+        mute_label_ = nullptr;
+        network_label_ = nullptr;
+        battery_label_ = nullptr;
     }
 
+    // emotion_label_ 可能已随 status_bar_ 一起被删除（微信模式），也可能还是 content_ 的子对象
+    // 但此处总要尝试删除（非微信模式），由于上面已置空，不会重复删除
     if (emotion_label_) {
         lv_obj_del(emotion_label_);
+        emotion_label_ = nullptr;
     }
 
     if (chat_message_label_) {
         lv_obj_del(chat_message_label_);
+        chat_message_label_ = nullptr;
     }
     if (content_) {
         lv_obj_del(content_);
+        content_ = nullptr;
     }
 
     content_ = lv_obj_create(container_);
