@@ -498,12 +498,12 @@ esp_err_t Ota::Activate() {
 }
 
 // add by xlc-mqtt -begin
-
+//HTTP请求服务器认证（添加设备）
 #ifdef ENB_OTA_LUMA_FUNC
 bool Ota::DeviceRegister(const std::string& mac, const std::string& uid, int deviceType)
 {
     // 使用默认注册URL
-    return DeviceRegister(mac, uid, deviceType, "http://101.43.32.17:8095/device/provision");
+    return DeviceRegister(mac, uid, deviceType, "http://xiangxinji.cn:8095/device/provision");
 }
 
 bool Ota::DeviceRegister(const std::string& mac, const std::string& uid, int deviceType, const std::string& url)
