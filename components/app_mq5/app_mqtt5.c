@@ -75,7 +75,7 @@ int app_mqtt5_set_cfg(char *client_id, char *username, char *password, char *uui
 #define C_MQ5_CLIENT_ID "wifi_" C_DEIVCE_ID "_" C_UUID_ID //"wifi_84f7037f19c1_1982827294154412034"
 #endif
 
-#define MQTT_CFG_HOST "mqtt://101.43.32.17"//DianXinNet 
+#define MQTT_CFG_HOST "mqtt://175.27.244.110"//DianXinNet 
 #define MQTT_CFG_PORT 1883
 #define MQTT_CFG_USER  (char *)(g_mq5_client_cfg.username)
 #define MQTT_CFG_PASS  (char *)(g_mq5_client_cfg.password)

@@ -56,8 +56,10 @@ void WifiBoard::EnterWifiConfigMode()
     
     // add by xlc-mqtt -begin
     #if 1//正式版 app sy0001
+    // char blufi_device_name[18+2];
+    // snprintf(blufi_device_name, sizeof(blufi_device_name), "SY_0001%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     char blufi_device_name[18+2];
-    snprintf(blufi_device_name, sizeof(blufi_device_name), "SY_0001%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    snprintf(blufi_device_name, sizeof(blufi_device_name), "YL_%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     #else//test 乐鑫官方app
     char blufi_device_name[18+2];
     strcpy(blufi_device_name, BLUFI_DEVICE_NAME);
@@ -96,7 +98,7 @@ void WifiBoard::EnterWifiConfigMode()
     auto &application = Application::GetInstance();
     application.SetDeviceState(kDeviceStateWifiConfiguring);
     static char mac_str[18];
-    snprintf(mac_str, sizeof(mac_str), "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     std::string msg = std::string(mac_str) + "\r\n" + "网络配置中";
     application.Alert(Lang::Strings::WIFI_CONFIG_MODE, msg.c_str(), "", Lang::Sounds::OGG_WIFICONFIG);
 

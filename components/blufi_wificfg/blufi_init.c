@@ -29,6 +29,7 @@
 #endif
 
 #include "blufi_log.h"
+#include "blufi_wificfg.h"
 
 static char *g_device_name = BLUFI_DEVICE_NAME;
 

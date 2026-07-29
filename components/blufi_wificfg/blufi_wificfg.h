@@ -1,6 +1,10 @@
 #ifndef __BLUFI_APP_H__
 #define __BLUFI_APP_H__
 
+#ifndef BLUFI_DEVICE_NAME
+#define BLUFI_DEVICE_NAME "BLUFI_DEMO"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
