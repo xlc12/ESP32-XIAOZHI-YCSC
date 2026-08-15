@@ -9,7 +9,7 @@
 #define HIGH_BRIGHTNESS 100
 #define LOW_BRIGHTNESS 10
 
-#define IDLE_BRIGHTNESS 5
+#define IDLE_BRIGHTNESS 1
 #define SPEAKING_BRIGHTNESS 75
 #define UPGRADING_BRIGHTNESS 25
 #define ACTIVATING_BRIGHTNESS 35
@@ -21,8 +21,8 @@
 #define LEDC_LS_MODE           LEDC_LOW_SPEED_MODE
 #define LEDC_LS_CH0_CHANNEL    LEDC_CHANNEL_0
 
-#define LEDC_DUTY              (8191)
-#define LEDC_FADE_TIME    (1000)
+#define LEDC_DUTY              (4000)
+#define LEDC_FADE_TIME    (800)
 // GPIO_LED
 
 GpioLed::GpioLed(gpio_num_t gpio)
@@ -110,6 +110,7 @@ void GpioLed::TurnOn() {
     std::lock_guard<std::mutex> lock(mutex_);
     esp_timer_stop(blink_timer_);
     ledc_fade_stop(ledc_channel_.speed_mode, ledc_channel_.channel);
+    fade_running_ = false;
     ledc_set_duty(ledc_channel_.speed_mode, ledc_channel_.channel, duty_);
     ledc_update_duty(ledc_channel_.speed_mode, ledc_channel_.channel);
 }
@@ -122,6 +123,7 @@ void GpioLed::TurnOff() {
     std::lock_guard<std::mutex> lock(mutex_);
     esp_timer_stop(blink_timer_);
     ledc_fade_stop(ledc_channel_.speed_mode, ledc_channel_.channel);
+    fade_running_ = false;
     ledc_set_duty(ledc_channel_.speed_mode, ledc_channel_.channel, 0);
     ledc_update_duty(ledc_channel_.speed_mode, ledc_channel_.channel);
 }
@@ -146,6 +148,7 @@ void GpioLed::StartBlinkTask(int times, int interval_ms) {
     std::lock_guard<std::mutex> lock(mutex_);
     esp_timer_stop(blink_timer_);
     ledc_fade_stop(ledc_channel_.speed_mode, ledc_channel_.channel);
+    fade_running_ = false;
 
     blink_counter_ = times * 2;
     blink_interval_ms_ = interval_ms;
@@ -168,7 +171,7 @@ void GpioLed::OnBlinkTimer() {
 }
 
 void GpioLed::StartFadeTask() {
-    if (!ledc_initialized_) {
+    if (!ledc_initialized_ || fade_running_) {
         return;
     }
 
@@ -176,6 +179,7 @@ void GpioLed::StartFadeTask() {
     esp_timer_stop(blink_timer_);
     ledc_fade_stop(ledc_channel_.speed_mode, ledc_channel_.channel);
     fade_up_ = true;
+    fade_running_ = true;
     ledc_set_fade_with_time(ledc_channel_.speed_mode,
                             ledc_channel_.channel, LEDC_DUTY, LEDC_FADE_TIME);
     ledc_fade_start(ledc_channel_.speed_mode,

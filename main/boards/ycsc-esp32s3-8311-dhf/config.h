@@ -18,7 +18,7 @@
 #define AUDIO_CODEC_I2C_SCL_PIN  GPIO_NUM_2
 #define AUDIO_CODEC_ES8311_ADDR  ES8311_CODEC_DEFAULT_ADDR
 
-#define BUILTIN_LED_GPIO        GPIO_NUM_NC
+#define BUILTIN_LED_GPIO        GPIO_NUM_8
 #define BOOT_BUTTON_GPIO        GPIO_NUM_47
 
 // 运动控制串口（仅发送，TX 接 IO4）
@@ -26,6 +26,10 @@
 #define MOTION_UART_TX_PIN      GPIO_NUM_4
 #define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_NC
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC
+
+// 灯光控制：IO48 按键，按一次亮、再按一次灭，灯由 IO16 控制
+#define LAMP_BUTTON_GPIO        GPIO_NUM_48
+#define LAMP_GPIO               GPIO_NUM_16
 
 typedef enum {
     LIGHT_MODE_CHARGING_BREATH = 0,
@@ -42,7 +46,6 @@ typedef enum {
 
 
 
-/*酱酒猫*/
 #define DISPLAY_DC_PIN     GPIO_NUM_11
 #define DISPLAY_CS_PIN     GPIO_NUM_12
 #define DISPLAY_CLK_PIN    GPIO_NUM_13
@@ -52,14 +55,6 @@ typedef enum {
 #define DISPLAY_RST_PIN       GPIO_NUM_21
 
 
-// /*龙昌猫*/
-// #define DISPLAY_DC_PIN     GPIO_NUM_6
-// #define DISPLAY_CS_PIN     GPIO_NUM_5
-// #define DISPLAY_CLK_PIN    GPIO_NUM_16
-// #define DISPLAY_MOSI_PIN   GPIO_NUM_15
-
-// #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_4
-// #define DISPLAY_RST_PIN       GPIO_NUM_7
 
 
 #ifdef CONFIG_LCD_GC9A01_160X160

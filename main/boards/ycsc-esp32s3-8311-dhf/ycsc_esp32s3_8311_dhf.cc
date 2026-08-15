@@ -6,6 +6,7 @@
 #include "config.h"
 #include "mcp_server.h"
 #include "settings.h"
+#include "led/gpio_led.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -108,6 +109,8 @@ class YcscEsp32S3Es8311Dhf : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
     Button boot_button_;
+    Button lamp_button_;
+    bool lamp_on_ = false;
     Display* display_;
     light_mode_t light_mode_ = LIGHT_MODE_ALWAYS_ON;
 
@@ -147,6 +150,32 @@ private:
                 return;
             }
             app.ToggleChatState();
+        });
+    }
+
+    void SetLamp(bool on) {
+        lamp_on_ = on;
+        gpio_set_level(LAMP_GPIO, on ? 1 : 0);
+    }
+
+    void ToggleLamp() {
+        SetLamp(!lamp_on_);
+    }
+
+    void InitializeLamp() {
+        // 灯（IO16）输出，默认关闭
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = (1ULL << LAMP_GPIO);
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        ESP_ERROR_CHECK(gpio_config(&io_conf));
+        SetLamp(false);
+
+        // 按键（IO48）：按一次亮，再按一次灭
+        lamp_button_.OnClick([this]() {
+            ToggleLamp();
         });
     }
 
@@ -281,6 +310,42 @@ private:
                 SendMotionCommand(cmd);
                 return std::string("运动指令已执行: ") + action;
             });
+
+        // 灯光控制 MCP 工具：供语音/AI 控制灯（IO16）
+        mcp_server.AddTool(
+            "self.lamp.turn_on",
+            "打开灯",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                SetLamp(true);
+                return true;
+            });
+
+        mcp_server.AddTool(
+            "self.lamp.turn_off",
+            "关闭灯",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                SetLamp(false);
+                return true;
+            });
+
+        mcp_server.AddTool(
+            "self.lamp.toggle",
+            "切换灯的亮灭状态",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                ToggleLamp();
+                return lamp_on_;
+            });
+
+        mcp_server.AddTool(
+            "self.lamp.get_state",
+            "获取灯的当前状态",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                return lamp_on_ ? "{\"power\": true}" : "{\"power\": false}";
+            });
     }
 
 
@@ -388,11 +453,12 @@ private:
     /***** 蓝牙遥控 -end *****/
 
 public:
-    YcscEsp32S3Es8311Dhf() : boot_button_(BOOT_BUTTON_GPIO) {
+    YcscEsp32S3Es8311Dhf() : boot_button_(BOOT_BUTTON_GPIO), lamp_button_(LAMP_BUTTON_GPIO) {
         InitializeI2c();
         InitializeSpi();
         InitializeLcdDisplay();
         InitializeButtons();
+        InitializeLamp();
 
         InitializeTools();
         InitializeMotionUart();
@@ -430,6 +496,11 @@ public:
     virtual Backlight* GetBacklight() override {
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
+    }
+
+    virtual Led* GetLed() override {
+        static GpioLed led(BUILTIN_LED_GPIO, 0);
+        return &led;
     }
 
 };
