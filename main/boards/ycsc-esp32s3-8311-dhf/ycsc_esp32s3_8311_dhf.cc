@@ -34,6 +34,20 @@
 #define TAG "YcscEsp32S3Es8311Dhf"
 
 
+/***** 运动控制串口 -begin *****/
+
+// 运动控制命令值（帧格式：0x55 0x5A + 命令 + 0x5B）
+typedef enum {
+    MOTION_CMD_STOP = 0xAA,     // 停止
+    MOTION_CMD_FORWARD = 0x01,  // 前进
+    MOTION_CMD_BACKWARD = 0x02, // 后退
+    MOTION_CMD_LEFT = 0x03,     // 左转
+    MOTION_CMD_RIGHT = 0x04,    // 右转
+} motion_command_t;
+
+/***** 运动控制串口 -end *****/
+
+
 /***** 蓝牙遥控 -begin *****/
 
 #include <stdio.h>
@@ -49,7 +63,7 @@ static const char *BLE_TAG = "BLE_REMOTE";
  *  键值定义（协议: [0x55][0x52][键值][0x5B]，键值为第3字节）
  *  根据你实际按键收到的值修改
  * ======================================================================== */
-#define KEY_POWER     0x06   // 示例：刚才收到的数据 55 52 11 5B，键值=0x11
+#define KEY_STOP     0xAA   // 示例：刚才收到的数据 55 52 11 5B，键值=0x11
 #define KEY_UP        0x01
 #define KEY_DOWN      0x02
 #define KEY_LEFT      0x03
@@ -136,6 +150,34 @@ private:
         });
     }
 
+    static void SendMotionFrame(motion_command_t cmd) {
+        uint8_t frame[4] = {0x55, 0x5A, (uint8_t)cmd, 0x5B};
+        uart_write_bytes(MOTION_UART_PORT, frame, sizeof(frame));
+    }
+
+    void InitializeMotionUart() {
+        uart_config_t uart_cfg = {
+            .baud_rate = 9600,
+            .data_bits = UART_DATA_8_BITS,
+            .parity = UART_PARITY_DISABLE,
+            .stop_bits = UART_STOP_BITS_1,
+            .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+            .source_clk = UART_SCLK_DEFAULT,
+        };
+        // 仅发送，不安装接收缓冲区
+        ESP_ERROR_CHECK(uart_driver_install(MOTION_UART_PORT, 256, 0, 0, nullptr, 0));
+        ESP_ERROR_CHECK(uart_param_config(MOTION_UART_PORT, &uart_cfg));
+        ESP_ERROR_CHECK(uart_set_pin(MOTION_UART_PORT, MOTION_UART_TX_PIN,
+                                     UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    }
+
+
+    
+    // 运动控制接口：发送一帧运动指令
+    void SendMotionCommand(motion_command_t cmd) {
+        SendMotionFrame(cmd);
+    }
+
     void InitializeLcdDisplay() {
         esp_lcd_panel_io_handle_t panel_io = nullptr;
         esp_lcd_panel_handle_t panel = nullptr;
@@ -202,7 +244,43 @@ private:
 
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
-        // 定义设备的属性
+
+        // 运动控制 MCP 工具：供语音/AI 调用，action 参数控制前后左右和停止
+        mcp_server.AddTool(
+            "self.motion.control",
+            "控制设备运动。action 可选值：forward(前进)、backward(后退)、left(左转)、right(右转)、stop(停止)。"
+            "每次调用发送一帧对应指令。"
+            "当用户要求跳舞或表演时，自己组合10个动作。",
+            PropertyList({
+                Property("action", kPropertyTypeString, std::string("stop"))
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                std::string action = properties["action"].value<std::string>();
+
+                motion_command_t cmd = MOTION_CMD_STOP;
+                bool valid = true;
+
+                if (action == "forward" || action == "前进") {
+                    cmd = MOTION_CMD_FORWARD;
+                } else if (action == "backward" || action == "后退") {
+                    cmd = MOTION_CMD_BACKWARD;
+                } else if (action == "left" || action == "左转") {
+                    cmd = MOTION_CMD_LEFT;
+                } else if (action == "right" || action == "右转") {
+                    cmd = MOTION_CMD_RIGHT;
+                } else if (action == "stop" || action == "停止" || action == "停下") {
+                    cmd = MOTION_CMD_STOP;
+                } else {
+                    valid = false;
+                }
+
+                if (!valid) {
+                    return std::string("无效的运动指令: ") + action;
+                }
+
+                SendMotionCommand(cmd);
+                return std::string("运动指令已执行: ") + action;
+            });
     }
 
 
@@ -216,25 +294,30 @@ private:
         ESP_LOGI(BLE_TAG, "key=0x%02X (raw len=%u)", (unsigned)event->key_code, event->raw_len);
 
         switch (event->key_code) {
-        case KEY_POWER:
-            ESP_LOGI(BLE_TAG, ">>> POWER 按下，执行开关控制");
+        case KEY_STOP:
+            ESP_LOGE(BLE_TAG, ">>> STOP 按下，执行停止");
             // 这里写你的控制代码，比如控制 GPIO、发消息等
+            SendMotionFrame(MOTION_CMD_STOP);
             break;
 
         case KEY_UP:
-            ESP_LOGI(BLE_TAG, ">>> UP 按下");
+            ESP_LOGE(BLE_TAG, ">>> UP 按下");
+            SendMotionFrame(MOTION_CMD_FORWARD);
             break;
 
         case KEY_LEFT:
-            ESP_LOGI(BLE_TAG, ">>> LEFT 按下");
+            ESP_LOGE(BLE_TAG, ">>> LEFT 按下");
+            SendMotionFrame(MOTION_CMD_LEFT);
             break;
 
         case KEY_RIGHT:
-            ESP_LOGI(BLE_TAG, ">>> RIGHT 按下");
+            ESP_LOGE(BLE_TAG, ">>> RIGHT 按下");
+            SendMotionFrame(MOTION_CMD_RIGHT);
             break;
 
         case KEY_DOWN:
-            ESP_LOGI(BLE_TAG, ">>> DOWN 按下");
+            ESP_LOGE(BLE_TAG, ">>> DOWN 按下");
+            SendMotionFrame(MOTION_CMD_BACKWARD);
             break;
 
         default:
@@ -300,17 +383,7 @@ private:
         }
     }
 
-    /* ========================================================================
-    *  自定义按键解析函数（覆盖 ble_remote.c 中的默认 weak 实现）
-    *  协议: [0x55][0x52][键值][0x5B]
-    * ======================================================================== */
-    uint32_t ble_remote_parse_key(const uint8_t *data, uint16_t len)
-    {
-        if (len >= 4 && data[0] == 0x55 && data[1] == 0x52 && data[3] == 0x5B) {
-            return data[2];   // 第3字节是键值
-        }
-        return 0;
-    }
+    
 
     /***** 蓝牙遥控 -end *****/
 
@@ -322,6 +395,8 @@ public:
         InitializeButtons();
 
         InitializeTools();
+        InitializeMotionUart();
+        SendMotionFrame(MOTION_CMD_FORWARD);
         GetBacklight()->RestoreBrightness();
 
         /***** 蓝牙遥控 -begin *****/
@@ -339,6 +414,7 @@ public:
         }
         /***** 蓝牙遥控 -end *****/
     }
+
 
     virtual AudioCodec* GetAudioCodec() override {
          static Es8311AudioCodec audio_codec(i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,

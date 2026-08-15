@@ -51,15 +51,27 @@ static ble_uuid16_t s_char_uuid = BLE_UUID16_INIT(BLE_REMOTE_NOTIFY_CHAR_UUID16)
  *                         weak 按键解析
  * ======================================================================== */
 
-__attribute__((weak))
-uint32_t ble_remote_parse_key(const uint8_t *data, uint16_t len)
-{
-    uint32_t code = 0;
-    for (uint16_t i = 0; i < len && i < 4; i++) {
-        code |= ((uint32_t)data[i]) << (i * 8);
+// __attribute__((weak))
+// uint32_t ble_remote_parse_key(const uint8_t *data, uint16_t len)
+// {
+//     uint32_t code = 0;
+//     for (uint16_t i = 0; i < len && i < 4; i++) {
+//         code |= ((uint32_t)data[i]) << (i * 8);
+//     }
+//     return code;
+// }
+
+/* ========================================================================
+    *  自定义按键解析函数（覆盖 ble_remote.c 中的默认 weak 实现）
+    *  协议: [0x55][0x52][键值][0x5B]
+    * ======================================================================== */
+    uint32_t ble_remote_parse_key(const uint8_t *data, uint16_t len)
+    {
+        if (len >= 4 && data[0] == 0x55 && data[1] == 0x52 && data[3] == 0x5B) {
+            return data[2];   // 第3字节是键值
+        }
+        return 0;
     }
-    return code;
-}
 
 /* ========================================================================
  *                         工具函数

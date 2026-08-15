@@ -20,6 +20,10 @@
 
 #define BUILTIN_LED_GPIO        GPIO_NUM_NC
 #define BOOT_BUTTON_GPIO        GPIO_NUM_47
+
+// 运动控制串口（仅发送，TX 接 IO4）
+#define MOTION_UART_PORT        UART_NUM_1
+#define MOTION_UART_TX_PIN      GPIO_NUM_4
 #define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_NC
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC
 
