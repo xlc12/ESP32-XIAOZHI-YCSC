@@ -1,0 +1,25 @@
+{
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "ycsc-esp32s3-8311-dk_ai",
+            "sdkconfig_append": [
+                "CONFIG_ESP32S3=y",
+                "CONFIG_BOARD_TYPE_YCSC_ESP32S3_8311_DK_AI=y",
+                "CONFIG_SPIRAM=y",
+                "CONFIG_LANGUAGE_ZH_CN=y",
+                "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/16m.csv\"",
+                "CONFIG_LCD_GC9A01_160X160=y",
+                "CONFIG_USE_SERVER_AEC=y",
+                "CONFIG_USE_AFE_WAKE_WORD=y",
+                "CONFIG_USE_CUSTOM_WAKE_WORD=n",
+                "CONFIG_SR_WN_WN9_XIAOAITONGXUE=y",
+                "CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS2=n",
+                "CONFIG_SEND_WAKE_WORD_DATA=y",
+                "CONFIG_WAKE_WORD_DETECTION_IN_LISTENING=y"
+
+            ]
+        }
+    ]
+}
