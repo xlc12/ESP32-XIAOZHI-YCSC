@@ -129,6 +129,12 @@ private:
         esp_lcd_panel_invert_color(panel, DISPLAY_INVERT_COLOR);
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+#ifdef CONFIG_LCD_ST7735_80X160
+        // ST7735S 0.96寸 80x160 内部 GRAM 偏移。
+        // 竖屏(不交换行列)：第1个参数是列偏移(左右)，第2个参数是行偏移(上下)。
+        // 不同批次常见值为 (26,1) 或 (24,0)。若左边/上边有花屏说明偏移偏大，调小即可。
+        esp_lcd_panel_set_gap(panel, 24, 0);
+#endif
 #ifdef  LCD_TYPE_GC9A01_SERIAL
         panel_config.vendor_config = &gc9107_vendor_config;
 #endif

@@ -10,7 +10,7 @@
                 "CONFIG_LANGUAGE_ZH_CN=y",
                 "CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y",
                 "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/16m.csv\"",
-                "CONFIG_LCD_GC9A01_160X160=y",
+                "CONFIG_LCD_ST7735_80X160=y",
                 "CONFIG_USE_SERVER_AEC=y",
                 "CONFIG_USE_AFE_WAKE_WORD=y",
                 "CONFIG_USE_CUSTOM_WAKE_WORD=n",
