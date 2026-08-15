@@ -33,8 +33,61 @@
 
 #define TAG "YcscEsp32S3Es8311Dhf"
 
+
+/***** 蓝牙遥控 -begin *****/
+
+#include <stdio.h>
+#include <inttypes.h>
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "ble_remote.h"
+
+static const char *BLE_TAG = "BLE_REMOTE";
+
+/* ========================================================================
+ *  键值定义（协议: [0x55][0x52][键值][0x5B]，键值为第3字节）
+ *  根据你实际按键收到的值修改
+ * ======================================================================== */
+#define KEY_POWER     0x06   // 示例：刚才收到的数据 55 52 11 5B，键值=0x11
+#define KEY_UP        0x01
+#define KEY_DOWN      0x02
+#define KEY_LEFT      0x03
+#define KEY_RIGHT     0x04
+
+/***** 蓝牙遥控 -end *****/
+
 LV_FONT_DECLARE(font_puhui_16_4);
 LV_FONT_DECLARE(font_awesome_16_4);
+
+static const gc9a01_lcd_init_cmd_t gc9107_lcd_init_cmds[] = {
+    //  {cmd, { data }, data_size, delay_ms}
+    {0xfe, (uint8_t[]){0x00}, 0, 0},
+    {0xef, (uint8_t[]){0x00}, 0, 0},
+    {0xb0, (uint8_t[]){0xc0}, 1, 0},
+    {0xb2, (uint8_t[]){0x2f}, 1, 0},
+    {0xb3, (uint8_t[]){0x03}, 1, 0},
+    {0xb6, (uint8_t[]){0x19}, 1, 0},
+    {0xb7, (uint8_t[]){0x01}, 1, 0},
+    {0xac, (uint8_t[]){0xcb}, 1, 0},
+    {0xab, (uint8_t[]){0x0e}, 1, 0},
+    {0xb4, (uint8_t[]){0x04}, 1, 0},
+    {0xa8, (uint8_t[]){0x19}, 1, 0},
+    {0xb8, (uint8_t[]){0x08}, 1, 0},
+    {0xe8, (uint8_t[]){0x24}, 1, 0},
+    {0xe9, (uint8_t[]){0x48}, 1, 0},
+    {0xea, (uint8_t[]){0x22}, 1, 0},
+    {0xc6, (uint8_t[]){0x30}, 1, 0},
+    {0xc7, (uint8_t[]){0x18}, 1, 0},
+    {0xf0,
+    (uint8_t[]){0x1f, 0x28, 0x04, 0x3e, 0x2a, 0x2e, 0x20, 0x00, 0x0c, 0x06,
+                0x00, 0x1c, 0x1f, 0x0f},
+    14, 0},
+    {0xf1,
+    (uint8_t[]){0x00, 0x2d, 0x2f, 0x3c, 0x6f, 0x1c, 0x0b, 0x00, 0x00, 0x00,
+                0x07, 0x0d, 0x11, 0x0f},
+    14, 0},
+};
 
 
 class YcscEsp32S3Es8311Dhf : public WifiBoard {
@@ -152,6 +205,115 @@ private:
         // 定义设备的属性
     }
 
+
+    /***** 蓝牙遥控 -begin *****/
+
+    /* ========================================================================
+ *  按键回调：在这里判断键值，执行你的控制逻辑
+ * ======================================================================== */
+    static void on_key_event(const ble_remote_key_event_t *event)
+    {
+        ESP_LOGI(BLE_TAG, "key=0x%02X (raw len=%u)", (unsigned)event->key_code, event->raw_len);
+
+        switch (event->key_code) {
+        case KEY_POWER:
+            ESP_LOGI(BLE_TAG, ">>> POWER 按下，执行开关控制");
+            // 这里写你的控制代码，比如控制 GPIO、发消息等
+            break;
+
+        case KEY_UP:
+            ESP_LOGI(BLE_TAG, ">>> UP 按下");
+            break;
+
+        case KEY_LEFT:
+            ESP_LOGI(BLE_TAG, ">>> LEFT 按下");
+            break;
+
+        case KEY_RIGHT:
+            ESP_LOGI(BLE_TAG, ">>> RIGHT 按下");
+            break;
+
+        case KEY_DOWN:
+            ESP_LOGI(BLE_TAG, ">>> DOWN 按下");
+            break;
+
+        default:
+            ESP_LOGW(BLE_TAG, ">>> 未知按键 key=0x%02X, raw:", (unsigned)event->key_code);
+            for (uint16_t i = 0; i < event->raw_len; i++) {
+                printf("%02X ", event->raw[i]);
+            }
+            printf("\n");
+            break;
+        }
+    }
+
+
+        /* ========================================================================
+    *  连接事件回调（推荐）：连上 / 就绪 / 断开，适合做提示
+    * ======================================================================== */
+    static void on_conn_event(ble_remote_conn_event_t event)
+    {
+        switch (event) {
+        case BLE_REMOTE_CONN_CONNECTED:
+            ESP_LOGI(BLE_TAG, ">>> 遥控器已连接");
+            // 这里做连接成功提示，比如亮灯、蜂鸣器等
+            break;
+
+        case BLE_REMOTE_CONN_READY:
+            ESP_LOGI(BLE_TAG, ">>> 遥控器就绪，可以接收按键");
+            // 这里做就绪提示
+            break;
+
+        case BLE_REMOTE_CONN_DISCONNECTED:
+            ESP_LOGW(BLE_TAG, ">>> 遥控器已断开，正在自动重连...");
+            // 这里做断开提示，比如闪灯、提示音等
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    /* ========================================================================
+    *  状态回调（可选）：细粒度状态变化
+    * ======================================================================== */
+    static void on_state_change(ble_remote_state_t state)
+    {
+        switch (state) {
+        case BLE_REMOTE_STATE_IDLE:
+            ESP_LOGW(BLE_TAG, "=== 已断开 ===");
+            break;
+        case BLE_REMOTE_STATE_SCANNING:
+            ESP_LOGI(BLE_TAG, "=== 扫描中 ===");
+            break;
+        case BLE_REMOTE_STATE_CONNECTING:
+            ESP_LOGI(BLE_TAG, "=== 连接中 ===");
+            break;
+        case BLE_REMOTE_STATE_CONNECTED:
+            ESP_LOGI(BLE_TAG, "=== 已连接 ===");
+            break;
+        case BLE_REMOTE_STATE_NOTIFY_READY:
+            ESP_LOGI(BLE_TAG, "=== 就绪，可以接收按键 ===");
+            break;
+        default:
+            break;
+        }
+    }
+
+    /* ========================================================================
+    *  自定义按键解析函数（覆盖 ble_remote.c 中的默认 weak 实现）
+    *  协议: [0x55][0x52][键值][0x5B]
+    * ======================================================================== */
+    uint32_t ble_remote_parse_key(const uint8_t *data, uint16_t len)
+    {
+        if (len >= 4 && data[0] == 0x55 && data[1] == 0x52 && data[3] == 0x5B) {
+            return data[2];   // 第3字节是键值
+        }
+        return 0;
+    }
+
+    /***** 蓝牙遥控 -end *****/
+
 public:
     YcscEsp32S3Es8311Dhf() : boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
@@ -161,6 +323,21 @@ public:
 
         InitializeTools();
         GetBacklight()->RestoreBrightness();
+
+        /***** 蓝牙遥控 -begin *****/
+        ESP_LOGE(BLE_TAG, "=== BLE Remote App Start ===");
+        /* 注册回调 */
+        ble_remote_register_key_callback(on_key_event);
+        ble_remote_register_conn_callback(on_conn_event);     // 连接事件（连上/就绪/断开）
+        ble_remote_register_state_callback(on_state_change);  // 细粒度状态（可选）
+
+        /* 初始化并自动连接 */
+        esp_err_t ret = ble_remote_init();
+        if (ret != ESP_OK) {
+            ESP_LOGE(BLE_TAG, "ble_remote_init failed: %s", esp_err_to_name(ret));
+            return;
+        }
+        /***** 蓝牙遥控 -end *****/
     }
 
     virtual AudioCodec* GetAudioCodec() override {
