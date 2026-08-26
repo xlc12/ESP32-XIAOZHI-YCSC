@@ -127,6 +127,10 @@ void OttoEmojiDisplay::SetupGifContainer() {
     lv_obj_set_style_border_width(emotion_gif_, 0, 0);
     lv_obj_set_style_bg_opa(emotion_gif_, LV_OPA_TRANSP, 0);
     lv_obj_center(emotion_gif_);
+    // 设置GIF旋转180度：设置旋转中心为对象中心，旋转角度1800（单位0.1度）
+    lv_obj_set_style_transform_pivot_x(emotion_gif_, LV_PCT(50), LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_y(emotion_gif_, LV_PCT(50), LV_PART_MAIN);
+    lv_obj_set_style_transform_angle(emotion_gif_, 1800, LV_PART_MAIN);
     lv_gif_set_src(emotion_gif_, &FaCai_1_2);
 
     chat_message_label_ = nullptr;
