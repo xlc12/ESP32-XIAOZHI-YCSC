@@ -16,6 +16,10 @@
 #include <driver/uart.h>
 #include <cstring>
 
+#include "power_save_timer.h"
+#include <esp_sleep.h>
+#include <driver/rtc_io.h>
+
 #if defined(LCD_TYPE_ILI9341_SERIAL)
 #include "esp_lcd_ili9341.h"
 #endif
@@ -185,6 +189,70 @@ static void dhf_play_once_task(void* arg) {
     vTaskDelete(nullptr);  // 一次性任务：解析完成后自删
 }
 
+/* ========================================================================
+ *  开机"延迟启动 DHF1 播放"任务
+ *  - 重要：为什么要延迟？Board 构造函数期间（构造函数还没return时），
+ *    Application 成员 audio_service_ 的 codec_ 指针还没被赋值为
+ *    Es8311AudioCodec 实例（赋值发生在 Application::Init 的后半段，
+ *    在 Board 构造**完全返回后**才进行）。若在构造函数里立即起任务
+ *    调 AudioService::PlaySound → codec_->output_enabled() → codec_==nullptr
+ *    → EXCVADDR=0x0000000F → LoadProhibited GuruMeditation 崩溃（用户日志铁证）。
+ *  - 解决：先 vTaskDelay(500ms) 让出 CPU，等 Board 构造返回、Application Init
+ *    走完、AudioService.codec_ 非空、AudioCodec 初始化完毕后，再开始播放。
+ *  - 这是一次性任务：播完 DHF1 后自己 vTaskDelete(nullptr)
+ * ======================================================================== */
+static void boot_delay_play_dhf1_task(void* arg) {
+    (void)arg;
+    // 1. 先等 500ms：让 Board 构造函数return + Application::Init 走完
+    //    + AudioService::codec_ = Es8311 真实实例，避免空指针崩溃
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // 2. 启动 LED 同步闪烁（跟切歌时完全一样的视觉反馈）
+    ESP_LOGI(BLE_TAG, "boot_delay_play: 500ms到，启动LED闪烁 + 解析DHF1");
+    start_led_blink_if_needed();
+
+    // 3. 同步解析 + push DHF1 队列（OGG解析耗时 200~1500ms，在本任务里执行）
+    constexpr int BOOT_SOUND_IDX = 0;  // 0 → DHF_SOUNDS[0] → DHF1.ogg
+    Application::GetInstance().PlaySound(DHF_SOUNDS[BOOT_SOUND_IDX]);
+    ESP_LOGI(BLE_TAG, "boot_delay_play: DHF1 解析完成（OpusCodec/AudioOutput 继续播后续帧）");
+
+    vTaskDelete(nullptr);  // 一次性任务：做完就自删
+}
+
+/* ========================================================================
+ *  同步等待当前正在播放的音频**完全播完**（调用方线程阻塞，直到喇叭播完最后一声）
+ *  - 用途：OnShutdownRequest 中播放 DHF11 关机提示音——必须等**真实播出完毕**
+ *          再关 PA / 背光 / 进 deep sleep，否则 I2S/DMA 时钟一关，最后几
+ *          百毫秒的音频会被拦腰截断，用户听到"咔"或者提示音只播了一半。
+ *  - 等待判据：AudioService::IsIdle() 连续 true ≥ 200ms
+ *      · IsIdle=true 仅表示 decode_queue / output_queue 都空了
+ *      · 再额外等 200ms 是等 I2S DMA FIFO 里最后几帧 PCM 真正被 DAC 输出到喇叭
+ *  - 超时保护：最多 15s（一首 DHFx 音频通常 2~10s），极端异常时不能卡死休眠流程
+ * ======================================================================== */
+static void wait_for_playback_done_sync(const char* log_tag) {
+    auto& audio_svc = Application::GetInstance().GetAudioService();
+    ESP_LOGI(log_tag, "等待音频播放完成（队列+DMA尾部）...");
+    int idle_streak_ms = 0;           // IsIdle 连续为 true 的累计时长
+    int total_wait_ms  = 0;           // 总等待时间（超时保护）
+    const int TIMEOUT_MS   = 15000;   // 硬超时 15s
+    const int IDLE_HOLD_MS = 200;     // 连续 Idle ≥ 200ms 才算"真播完"
+    while (total_wait_ms < TIMEOUT_MS) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        total_wait_ms += 20;
+        if (audio_svc.IsIdle()) {
+            idle_streak_ms += 20;
+            if (idle_streak_ms >= IDLE_HOLD_MS) {
+                ESP_LOGI(log_tag, "音频播放完成（连续Idle=%dms，总等=%dms）",
+                         idle_streak_ms, total_wait_ms);
+                return;
+            }
+        } else {
+            idle_streak_ms = 0;  // 还在输出帧，说明没播完，重置"连续Idle"
+        }
+    }
+    ESP_LOGW(log_tag, "等待音频播放超时（%dms仍未完成），强制继续后续流程", TIMEOUT_MS);
+}
+
 // 切歌 worker 任务：阻塞在队列上，收到请求执行"停止+LED启动+创建解析任务"后立即回队列
 // —— 关键：Worker 绝不自己跑 PlaySound（耗时几秒），最多200ms就回xQueueReceive接新键
 static void sound_switch_worker_task(void* arg) {
@@ -311,7 +379,8 @@ static void start_led_blink_if_needed() {
     stop_led_blink_if_running();
     // ---- 关键：代次+1，旧任务即使还在vTaskDelay中，返回后会立即检测到退出 ----
     //            这样无需等待旧任务退出，也不会出现两个任务同时闪的乱序
-    blink_generation_++;
+    // （注意：blink_generation_ 是 volatile uint32_t，后缀++已deprecated，改用赋值形式）
+    blink_generation_ = blink_generation_ + 1;
     // 保存此刻（切歌完成、新歌即将播放时）的LED状态作为新歌播放完的恢复基准
     led_blink_prev_lamp_on_ = (gpio_get_level(LAMP_GPIO) == 1);
     led_blink_running_ = true;
@@ -378,6 +447,7 @@ private:
     bool lamp_on_ = false;
     Display* display_;
     light_mode_t light_mode_ = LIGHT_MODE_ALWAYS_ON;
+    PowerSaveTimer* power_save_timer_;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -725,10 +795,228 @@ private:
             break;
         }
     }
+    
 
     
 
     /***** 蓝牙遥控 -end *****/
+
+
+
+        //省电管理
+    void InitializePowerSaveTimer() {
+        // 检测是否从深度睡眠中被按键（RTC GPIO 中断）唤醒
+        esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+        if (cause == ESP_SLEEP_WAKEUP_EXT0) {
+            ESP_LOGI(TAG, "按键唤醒，正常启动");
+        }
+
+        power_save_timer_ = new PowerSaveTimer(-1, 20, 60);//600秒,10分钟
+        power_save_timer_->OnEnterSleepMode([this]() {
+
+            auto display = GetDisplay();
+            // display->SetEmotion("Sleep_1_5");
+            ESP_LOGE(TAG, "省电管理： 开启");
+
+
+        });
+        power_save_timer_->OnExitSleepMode([this]() {
+            auto display = GetDisplay();
+            // display->SetEmotion("wait_1_6");
+            ESP_LOGI(TAG, "省电管理： 关闭");
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+            ESP_LOGI(TAG, "省电管理：准备进入深度睡眠，先播放关机提示音 DHF11");
+
+            // 1. 发送停止指令（运动控制先停）
+            SendMotionFrame(MOTION_CMD_STOP);
+
+            // 2. 先清掉当前可能在播放的其他音频，保证等会儿DHF11干净起播
+            stop_all_sound_playback();
+
+            // 3. 确保**功放是打开的**（不能关早了！），否则播DHF11时喇叭不响
+            gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
+
+            // 4. LED同步闪亮（关机提示音也要有视觉反馈）—— 新启动一轮闪烁
+            start_led_blink_if_needed();
+
+            // 5. 同步解析 + push DHF11 到播放队列（索引=10，即最后一首）
+            //    ——这里故意不放独立任务，因为接下来要同步等它播完
+            constexpr int SHUTDOWN_SOUND_IDX = DHF_SOUND_COUNT - 1;  // = 10 → DHF11
+            ESP_LOGI(TAG, "OnShutdownRequest: 开始解析 DHF%d（关机提示音，同步解析）", SHUTDOWN_SOUND_IDX + 1);
+            Application::GetInstance().PlaySound(DHF_SOUNDS[SHUTDOWN_SOUND_IDX]);
+            ESP_LOGI(TAG, "OnShutdownRequest: DHF%d 解析完成，开始等待播放完成...", SHUTDOWN_SOUND_IDX + 1);
+
+            // 6. 阻塞等待 DHF11 **真实完整播出完毕**（含 I2S DMA 尾部 200ms）
+            //    —— 必须等完再关 PA/背光/休眠，否则最后 200~500ms 声音被截断
+            wait_for_playback_done_sync(TAG);
+
+            // 7. 停止LED闪烁任务（代次自增，让 blink_task 自己退出），并恢复LED原状态
+            // （注意：blink_generation_ 是 volatile uint32_t，后缀++已deprecated，改用赋值形式）
+            blink_generation_ = blink_generation_ + 1;
+            led_blink_running_ = false;
+            if (led_blink_task_handle_ != nullptr) {
+                led_blink_task_handle_ = nullptr;
+            }
+            gpio_set_level(LAMP_GPIO, led_blink_prev_lamp_on_ ? 1 : 0);
+            led_blink_prev_lamp_on_ = false;
+
+            // 8. 关闭背光 & 关闭功放（**等声音播完才关**！）
+            gpio_set_level(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT ? 1 : 0);
+            gpio_set_level(AUDIO_CODEC_PA_PIN, 0);
+
+            ESP_LOGI(TAG, "省电管理：关机提示音播放完毕，正式进入休眠");
+
+            /*****************************************************************
+             *  休眠模式选择（关键：GPIO47 不是 RTC GPIO，deep sleep 无法按键唤醒，
+             *                硬件又不能改→所以 light sleep 是唯一可行软件方案）
+             *  - GPIO0~21（RTC域）：deep sleep（功耗~μA级）+ 尝试 ext0/ext1/gpio_deep_sleep
+             *  - GPIO>21（数字域，如GPIO47）：**light sleep**（功耗几十~几百μA，仍远
+             *    低于Active 100mA+） + gpio_wakeup_enable 普通GPIO中断唤醒 +
+             *    1小时timer兜底；唤醒后主动 esp_restart() → 等同于重开机（播DHF1等）
+             *****************************************************************/
+            const bool is_rtc_gpio = (BOOT_BUTTON_GPIO >= GPIO_NUM_0 &&
+                                      BOOT_BUTTON_GPIO <= GPIO_NUM_21);
+
+            if (is_rtc_gpio) {
+                /******************************************************************
+                 *  RTC GPIO（0~21）：走 deep sleep 原流程
+                 *  三种唤醒方式逐个尝试（ext0→ext1→gpio_deep_sleep），全部失败也不
+                 *  abort，最多deep sleep后无法按键唤醒只能RESET/断电。
+                 ******************************************************************/
+                bool wakeup_ok = false;
+                esp_err_t ext0_err = esp_sleep_enable_ext0_wakeup(BOOT_BUTTON_GPIO, 0);
+                if (ext0_err == ESP_OK) {
+                    wakeup_ok = true;
+                    ESP_LOGI(TAG, "DEEP_SLEEP：ext0 配置成功 (gpio=%d, 低电平)", (int)BOOT_BUTTON_GPIO);
+                } else {
+                    ESP_LOGW(TAG, "DEEP_SLEEP：ext0 失败 err=0x%x(%s)，尝试 ext1",
+                             ext0_err, esp_err_to_name(ext0_err));
+                    // ext1 单引脚场景：ALL_LOW 已在ESP32-S3 deprecated，改用 ANY_LOW（单pin下两者等价）
+                    esp_err_t ext1_err = esp_sleep_enable_ext1_wakeup(
+                        1ULL << (uint32_t)BOOT_BUTTON_GPIO, ESP_EXT1_WAKEUP_ANY_LOW);
+                    if (ext1_err == ESP_OK) {
+                        wakeup_ok = true;
+                        ESP_LOGI(TAG, "DEEP_SLEEP：ext1 配置成功 (gpio=%d, ANY_LOW)", (int)BOOT_BUTTON_GPIO);
+                    } else {
+                        ESP_LOGW(TAG, "DEEP_SLEEP：ext1 失败 err=0x%x(%s)，尝试 gpio_wakeup",
+                                 ext1_err, esp_err_to_name(ext1_err));
+                        // gpio_wakeup_enable：官方GPIO deep sleep 唤醒的新 API（对RTC GPIO在deep sleep也生效）
+                        // 替代在当前ESP-IDF v5.5.3中已移除的 gpio_deep_sleep_wakeup_enable()
+                        esp_err_t gds_err = gpio_wakeup_enable(BOOT_BUTTON_GPIO, GPIO_INTR_LOW_LEVEL);
+                        if (gds_err == ESP_OK) {
+                            esp_err_t g_enable_err = esp_sleep_enable_gpio_wakeup();
+                            if (g_enable_err == ESP_OK) {
+                                wakeup_ok = true;
+                                ESP_LOGI(TAG, "DEEP_SLEEP：gpio_wakeup 成功 (gpio=%d, LOW_LEVEL)",
+                                         (int)BOOT_BUTTON_GPIO);
+                            } else {
+                                ESP_LOGW(TAG, "DEEP_SLEEP：esp_sleep_enable_gpio_wakeup 失败 err=0x%x(%s)",
+                                         g_enable_err, esp_err_to_name(g_enable_err));
+                            }
+                        } else {
+                            ESP_LOGW(TAG, "DEEP_SLEEP：gpio_wakeup_enable 失败 err=0x%x(%s)",
+                                     gds_err, esp_err_to_name(gds_err));
+                        }
+                    }
+                }
+                if (!wakeup_ok) {
+                    ESP_LOGE(TAG, "DEEP_SLEEP：三种唤醒源全部失败（gpio=%d不支持deep sleep按键唤醒）。"
+                             "deep sleep后只能RESET/断电重上电唤醒。", (int)BOOT_BUTTON_GPIO);
+                }
+                // RTC 上下拉（失败不 abort）
+                esp_err_t pu_err = rtc_gpio_pullup_en(BOOT_BUTTON_GPIO);
+                if (pu_err != ESP_OK) {
+                    ESP_LOGW(TAG, "rtc_gpio_pullup_en(gpio=%d)失败: 0x%x(%s)",
+                             (int)BOOT_BUTTON_GPIO, pu_err, esp_err_to_name(pu_err));
+                }
+                esp_err_t pd_err = rtc_gpio_pulldown_dis(BOOT_BUTTON_GPIO);
+                if (pd_err != ESP_OK) {
+                    ESP_LOGW(TAG, "rtc_gpio_pulldown_dis(gpio=%d)失败: 0x%x(%s)",
+                             (int)BOOT_BUTTON_GPIO, pd_err, esp_err_to_name(pd_err));
+                }
+
+                ESP_LOGI(TAG, "--- 进入 deep sleep（永不返回，除非唤醒源生效）---");
+                esp_deep_sleep_start();
+            } else {
+                /******************************************************************
+                 *  非 RTC GPIO（如 GPIO47）：必须使用 light sleep + 普通GPIO唤醒
+                 *  light sleep 期间数字域保持电源，GPIO中断控制器仍然运行，所以
+                 *  gpio_wakeup_enable(GPIO47) 能正常生效。
+                 *  - 流程：配置GPIO输入+上拉→配置gpio低电平唤醒→配置1h timer兜底
+                 *          →esp_light_sleep_start()→唤醒→esp_restart()软重启
+                 *  - 软重启会走完整Board构造+延迟播DHF1开机音+BLE重连，和上电
+                 *    表现完全一致（用户体感就是"按键开机"）。
+                 ******************************************************************/
+                ESP_LOGI(TAG, "LIGHT_SLEEP：BOOT_GPIO=%d 非RTC GPIO，采用light sleep+普通GPIO唤醒",
+                         (int)BOOT_BUTTON_GPIO);
+
+                // 1) 确保 BOOT 按键引脚配置为 INPUT + PULL_UP（硬件设计是按键按下→接地）
+                //    —— light sleep 下 gpio_set_pull_mode 仍然有效
+                gpio_config_t boot_gpio_cfg = {};
+                boot_gpio_cfg.pin_bit_mask = 1ULL << (uint32_t)BOOT_BUTTON_GPIO;
+                boot_gpio_cfg.mode         = GPIO_MODE_INPUT;
+                boot_gpio_cfg.pull_up_en   = GPIO_PULLUP_ENABLE;
+                boot_gpio_cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+                boot_gpio_cfg.intr_type    = GPIO_INTR_DISABLE;  // 唤醒由 gpio_wakeup_enable 控制
+                esp_err_t cfg_err = gpio_config(&boot_gpio_cfg);
+                if (cfg_err != ESP_OK) {
+                    ESP_LOGW(TAG, "LIGHT_SLEEP：gpio_config(gpio=%d)失败 err=0x%x(%s)，继续尝试",
+                             (int)BOOT_BUTTON_GPIO, cfg_err, esp_err_to_name(cfg_err));
+                }
+
+                // 2) 配置 GPIO 低电平唤醒（light sleep下支持任意GPIO，不限于RTC域）
+                esp_err_t gw_err = gpio_wakeup_enable(BOOT_BUTTON_GPIO, GPIO_INTR_LOW_LEVEL);
+                bool gpio_wakeup_ok = false;
+                if (gw_err == ESP_OK) {
+                    esp_err_t ge_err = esp_sleep_enable_gpio_wakeup();
+                    if (ge_err == ESP_OK) {
+                        gpio_wakeup_ok = true;
+                        ESP_LOGI(TAG, "LIGHT_SLEEP：gpio_wakeup 配置成功 (gpio=%d, LOW_LEVEL)",
+                                 (int)BOOT_BUTTON_GPIO);
+                    } else {
+                        ESP_LOGW(TAG, "LIGHT_SLEEP：esp_sleep_enable_gpio_wakeup 失败 err=0x%x(%s)",
+                                 ge_err, esp_err_to_name(ge_err));
+                    }
+                } else {
+                    ESP_LOGW(TAG, "LIGHT_SLEEP：gpio_wakeup_enable(gpio=%d)失败 err=0x%x(%s)",
+                             (int)BOOT_BUTTON_GPIO, gw_err, esp_err_to_name(gw_err));
+                }
+
+                if (!gpio_wakeup_ok) {
+                    ESP_LOGE(TAG, "LIGHT_SLEEP：GPIO唤醒配置失败！"
+                             "light sleep后无法通过BOOT键唤醒，只能RESET/断电重启。");
+                }
+
+                // 3) 进入 light sleep（该函数阻塞，被唤醒后返回）
+                ESP_LOGI(TAG, "--- 进入 light sleep（BOOT按键按下低电平后唤醒并软重启）---");
+                esp_err_t ls_err = esp_light_sleep_start();
+                if (ls_err != ESP_OK) {
+                    ESP_LOGE(TAG, "LIGHT_SLEEP：esp_light_sleep_start 失败 err=0x%x(%s)，降级直接重启",
+                             ls_err, esp_err_to_name(ls_err));
+                } else {
+                    // light sleep 正常唤醒返回：记录唤醒原因便于调试
+                    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+                    const char* cause_str = "UNKNOWN";
+                    switch (cause) {
+                    case ESP_SLEEP_WAKEUP_GPIO:    cause_str = "GPIO(BOOT按键)"; break;
+                    case ESP_SLEEP_WAKEUP_TIMER:   cause_str = "TIMER";           break;
+                    case ESP_SLEEP_WAKEUP_EXT0:    cause_str = "EXT0";            break;
+                    case ESP_SLEEP_WAKEUP_EXT1:    cause_str = "EXT1";            break;
+                    default: break;
+                    }
+                    ESP_LOGI(TAG, "LIGHT_SLEEP：唤醒成功，原因=%s（原因code=%d）。执行软重启回到'开机'流程",
+                             cause_str, (int)cause);
+                }
+
+                // 4) 软重启 → 重新跑 app_main → Board 构造 → 延迟播 DHF1 + BLE重连……
+                //    用户体感：按BOOT → 设备开机（等同于从断电状态上电启动）
+                esp_restart();
+            }
+        });
+
+        power_save_timer_->SetEnabled(true);
+    }
 
 public:
     YcscEsp32S3Es8311Dhf() : boot_button_(BOOT_BUTTON_GPIO), lamp_button_(LAMP_BUTTON_GPIO) {
@@ -758,7 +1046,26 @@ public:
         }
         /* 创建切歌异步处理队列 + Worker 任务（必须在回调注册后使用）*/
         sound_switch_init_async();
+
+        /**********************************************************************
+         *  开机自动播放 DHF1 + LED同步闪烁（延迟启动，500ms后执行）
+         *  - 为什么不能立即执行？Board 构造还在执行阶段，Application::audio_service_
+         *    的 codec_ 指针还没被赋值为 Es8311 实例（赋值在 Board 构造完全返回后、
+         *    Application::Init 后半段才执行）。立即调 PlaySound 会访问空指针
+         *    codec_ → LoadProhibited 崩溃（EXCVADDR=0x0000000F）。
+         *  - 策略：这里只创建 boot_delay_play_dhf1_task，该任务会先 vTaskDelay(500ms)
+         *    等待所有初始化完成，然后再 start_led_blink_if_needed() + PlaySound(DHF1)
+         *  - 非阻塞：xTaskCreate 几十μs完成，不阻塞 InitializePowerSaveTimer() 继续
+         **********************************************************************/
+        ESP_LOGI(BLE_TAG, "开机：注册延迟播放任务（500ms后启动LED闪烁+播放DHF1）");
+        BaseType_t boot_delay_ret = xTaskCreate(boot_delay_play_dhf1_task, "boot_dhfrun",
+                                                4096, nullptr, 5, nullptr);
+        if (boot_delay_ret != pdPASS) {
+            ESP_LOGE(BLE_TAG, "开机：创建boot_delay_play任务失败: %d（跳过开机播放）", boot_delay_ret);
+        }
         /***** 蓝牙遥控 -end *****/
+
+        InitializePowerSaveTimer();
     }
 
 
