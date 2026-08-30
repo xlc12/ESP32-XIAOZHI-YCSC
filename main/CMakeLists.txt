@@ -227,6 +227,12 @@ elseif(CONFIG_BOARD_TYPE_LABPLUS_LEDONG_V2)
 elseif(CONFIG_BOARD_TYPE_SURFER_C3_1_14TFT)
     set(BOARD_TYPE "surfer-c3-1.14tft")
 endif()
+
+# 扫描板级专属音频文件（boards/<board>/sounds/*.ogg）
+file(GLOB BOARD_SOUNDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/sounds/*.ogg
+)
+
 file(GLOB BOARD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c
@@ -309,7 +315,7 @@ if(CONFIG_IDF_TARGET_ESP32)
 endif()
 
 idf_component_register(SRCS ${SOURCES}
-                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
+                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${BOARD_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     )
@@ -324,20 +330,14 @@ target_compile_definitions(${COMPONENT_LIB}
                     )
 
 # 添加生成规则
-add_custom_command(
-    OUTPUT ${LANG_HEADER}
+# gen_lang.py 内部比较新旧内容，只有变化时才写入，避免不必要重编译
+add_custom_target(lang_header ALL
     COMMAND python ${PROJECT_DIR}/scripts/gen_lang.py
             --language "${LANG_DIR}"
             --output "${LANG_HEADER}"
-    DEPENDS
-        ${LANG_JSON}
-        ${PROJECT_DIR}/scripts/gen_lang.py
+            --board "${BOARD_TYPE}"
+    BYPRODUCTS ${LANG_HEADER}
     COMMENT "Generating ${LANG_DIR} language config"
-)
-
-# 强制建立生成依赖
-add_custom_target(lang_header ALL
-    DEPENDS ${LANG_HEADER}
 )
 
 if(CONFIG_BOARD_TYPE_ESP_HI)

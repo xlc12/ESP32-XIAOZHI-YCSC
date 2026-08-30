@@ -50,7 +50,7 @@ def get_sound_files(directory):
         return []
     return [f for f in os.listdir(directory) if f.endswith('.ogg')]
 
-def generate_header(lang_code, output_path):
+def generate_header(lang_code, output_path, board_type=None):
     # 从输出路径推导项目结构
     # output_path 通常是 main/assets/lang_config.h
     main_dir = os.path.dirname(output_path)  # main/assets
@@ -160,6 +160,25 @@ def generate_header(lang_code, output_path):
         static_cast<size_t>(ogg_{base_name}_end - ogg_{base_name}_start)
         }};''')
 
+    # 扫描板级专属音效文件（boards/<board>/sounds/*.ogg）
+    board_sounds = []
+    if board_type:
+        board_sounds_dir = os.path.join(main_dir, 'boards', board_type, 'sounds')
+        board_sounds = get_sound_files(board_sounds_dir)
+        if board_sounds:
+            print(f"Board '{board_type}' sounds found: {len(board_sounds)} files")
+            for file in sorted(board_sounds):
+                base_name = os.path.splitext(file)[0]
+                sounds.append(f'''
+        extern const char ogg_{base_name}_start[] asm("_binary_{base_name}_ogg_start");
+        extern const char ogg_{base_name}_end[] asm("_binary_{base_name}_ogg_end");
+        static const std::string_view OGG_{base_name.upper()} {{
+        static_cast<const char*>(ogg_{base_name}_start),
+        static_cast<size_t>(ogg_{base_name}_end - ogg_{base_name}_start)
+        }};''')
+        else:
+            print(f"Board '{board_type}' has no custom sounds in {board_sounds_dir}")
+
     # 填充模板
     content = HEADER_TEMPLATE.format(
         lang_code=lang_code,
@@ -168,8 +187,14 @@ def generate_header(lang_code, output_path):
         sounds="\n".join(sorted(sounds))
     )
 
-    # 写入文件
+    # 写入文件（只在内容变化时才写入，避免不必要重编译）
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    if os.path.exists(output_path):
+        with open(output_path, 'r', encoding='utf-8') as f:
+            old_content = f.read()
+        if old_content == content:
+            print("No changes, skipping write")
+            return
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(content)
 
@@ -177,10 +202,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate language configuration header file with en-US fallback")
     parser.add_argument("--language", required=True, help="Language code (e.g: zh-CN, en-US, ja-JP)")
     parser.add_argument("--output", required=True, help="Output header file path")
+    parser.add_argument("--board", required=False, default=None, help="Board type for board-specific sounds (e.g: polarizon-esp32s3-01-csy)")
     args = parser.parse_args()
 
     try:
-        generate_header(args.language, args.output)
+        generate_header(args.language, args.output, args.board)
         print(f"Successfully generated language config file: {args.output}")
     except Exception as e:
         print(f"Error: {e}")
