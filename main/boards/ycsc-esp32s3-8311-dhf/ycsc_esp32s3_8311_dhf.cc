@@ -7,6 +7,7 @@
 #include "mcp_server.h"
 #include "settings.h"
 #include "led/gpio_led.h"
+#include "assets/lang_config.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -39,7 +40,7 @@
 
 // 运动控制命令值（帧格式：0x55 0x5A + 命令 + 0x5B）
 typedef enum {
-    MOTION_CMD_STOP = 0xAA,     // 停止
+    MOTION_CMD_STOP = 0x00,     // 停止
     MOTION_CMD_FORWARD = 0x01,  // 前进
     MOTION_CMD_BACKWARD = 0x02, // 后退
     MOTION_CMD_LEFT = 0x03,     // 左转
@@ -61,6 +62,268 @@ typedef enum {
 static const char *BLE_TAG = "BLE_REMOTE";
 
 /* ========================================================================
+ *  DHF 音效循环播放：共11首（DHF1~DHF11），按顺序循环切换
+ * ======================================================================== */
+static const std::string_view DHF_SOUNDS[] = {
+    Lang::Sounds::OGG_DHF1,
+    Lang::Sounds::OGG_DHF2,
+    Lang::Sounds::OGG_DHF3,
+    Lang::Sounds::OGG_DHF4,
+    Lang::Sounds::OGG_DHF5,
+    Lang::Sounds::OGG_DHF6,
+    Lang::Sounds::OGG_DHF7,
+    Lang::Sounds::OGG_DHF8,
+    Lang::Sounds::OGG_DHF9,
+    Lang::Sounds::OGG_DHF10,
+    Lang::Sounds::OGG_DHF11,
+};
+static const int DHF_SOUND_COUNT = sizeof(DHF_SOUNDS) / sizeof(DHF_SOUNDS[0]);
+static int dhf_sound_index_ = DHF_SOUND_COUNT - 1;  // 初始指向最后一首，第一次按下即切到DHF1
+
+/* ========================================================================
+ *  LED 闪烁配置与控制（播放音频时同步闪亮）
+ * ======================================================================== */
+// ===== 可配置项：LED 闪烁间隔（单位：毫秒，修改此处即可调整闪烁速度）=====
+#define LED_BLINK_INTERVAL_MS     300    // 亮/灭各保持的时间，例如300表示亮300ms灭300ms循环
+// =========================================================================
+
+static TaskHandle_t led_blink_task_handle_ = nullptr;
+static volatile bool led_blink_running_ = false;
+static volatile bool led_blink_prev_lamp_on_ = false;
+static volatile uint32_t blink_generation_ = 0;  // 每次start递增1，被取代的旧任务检测到代次变化立即退出
+
+/* ===== LED 控制函数前向声明（sound_switch 代码会提前调用它们）===== */
+static void led_blink_task(void* arg);
+static void stop_led_blink_if_running();
+static void start_led_blink_if_needed();
+
+/* ========================================================================
+ *  切歌请求异步处理：避免阻塞 BLE(NimBLE) 任务导致按键丢失
+ *  使用长度=1的队列，xQueueOverwrite 新请求覆盖旧请求（快速连按只响应最后一次）
+ * ======================================================================== */
+/* ========================================================================
+ *  可靠的音频完全停止机制（在 worker 任务里执行，允许短时间阻塞）
+ *  解决的残留场景：
+ *    1. OpusCodecTask 已经从 decode_queue 取出 packet，正在解码（几十 ms），
+ *       解完后会 push 到 playback_queue → 需要等它解完入队后再清一次
+ *    2. AudioOutputTask 已经从 playback_queue 取出 task 正在写 I2S
+ *       → ResetDecoder() 内部已做 EnableOutput(false)+10ms 截断 DMA
+ *    3. PlaySound() 正在解析 OGG page → sound_generation_++ 会让它
+ *       在每页边界检测到代次变化后自行退出
+ * ======================================================================== */
+static void stop_all_sound_playback() {
+    auto& audio_svc = Application::GetInstance().GetAudioService();
+    // 直接拿 Board 上的 Es8311AudioCodec 实例（和 AudioService 用的是同一个）
+    // 用来绕过 ResetDecoder 的"output_enabled()==true 才关"的条件判断，
+    // 每轮必关输出，把 AudioOutputTask 的自动 EnableOutput(true) 压制住
+    auto* codec = Board::GetInstance().GetAudioCodec();
+
+    // 第1次：sound_generation_++ 中止 PlaySound 解析 + 清空所有队列
+    // ResetDecoder 内部自带条件式 EnableOutput(false)+10ms delay
+    audio_svc.ResetDecoder();
+
+    // 高频清理循环：Worker 优先级(6) > AudioOutputTask(4)，每 10ms 我们就能抢占回来
+    // 强制关一次输出。即使 AudioOutputTask 检测到 output==false 自动 EnableOutput(true)，
+    // 最多只给它留了约10ms的输出窗口 → 写入 DMA 的 PCM 不足，不可闻
+    const int MAX_TRIES = 600;  // 20轮 * 10ms = 约200ms清理期（≈3~4个Opus帧）
+    for (int i = 0; i < MAX_TRIES; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        // 关键1：每轮无条件先关输出（不管 ResetDecoder 内部是否执行）
+        if (codec != nullptr) {
+            codec->EnableOutput(false);
+        }
+
+        // 关键2：清队列（含 OpusCodecTask 刚解完 push 回来的残留；
+        // 若 output 还是true，ResetDecoder 内部还会再做一次关输出+10ms等待）
+        audio_svc.ResetDecoder();
+
+        if (audio_svc.IsIdle()) {
+            // IsIdle 说明队列已经空了，但为了把 OpusCodecTask 手上可能还在解的
+            // 最后一帧也打掉，再巩固 3 轮（30ms）
+            for (int j = 0; j < 3; j++) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+                if (codec != nullptr) codec->EnableOutput(false);
+                audio_svc.ResetDecoder();
+            }
+            ESP_LOGI(BLE_TAG, "stop_playback: 第%d轮后Idle，已再巩固3轮", i + 1);
+            break;
+        }
+    }
+
+    // 最终兜底：再强制关输出 + 清一次队列
+    // 保持 output=false 状态进入 PlaySound，PlaySound 开头会自动 Enable(true) 恢复
+    if (codec != nullptr) {
+        codec->EnableOutput(false);
+    }
+    audio_svc.ResetDecoder();
+    ESP_LOGI(BLE_TAG, "stop_playback: 完成，最终IsIdle=%d", audio_svc.IsIdle() ? 1 : 0);
+}
+
+static QueueHandle_t sound_switch_queue_ = nullptr;  // 存放 uint8_t（任意值即可，只为触发）
+static TaskHandle_t sound_switch_task_handle_ = nullptr;
+
+/* ========================================================================
+ *  独立的"播放一次"任务（一次性任务，跑完自删）
+ *  - 原因：PlaySound() 是同步解析 OGG（逐页扫描+逐包解析push进decode_queue），
+ *    对几十秒的音频会花 2~5 秒甚至更久。若放在 Worker 里同步执行，
+ *    Worker 无法回到 xQueueReceive，这段时间所有按键只能 Overwrite 但不被处理，
+ *    表现为"音频播放时按键没有立即响应"（用户日志铁证）。
+ *  - 解决：Worker 只做 Stop+LED 控制（≈200ms），把耗时的 PlaySound 解析扔到这个
+ *    独立的一次性任务里。Worker 创建完任务后立即回到 xQueueReceive 等待下一次按键。
+ *  - 中止安全：若这个任务在解析 OGG 时用户又按了键，Worker 会再次调用
+ *    ResetDecoder() → sound_generation_++，PlaySound() 内部在每页解析前都会
+ *    检查 sound_generation_ 代次，变化则立即 return，不会往队列里推旧歌数据。
+ * ======================================================================== */
+static void dhf_play_once_task(void* arg) {
+    // 注意：用 (intptr_t) 把索引值传进来，**不能读全局 dhf_sound_index_**
+    // 因为任务创建后到实际运行前，可能用户又按了新键覆盖了全局值
+    const int idx = (int)(intptr_t)arg;
+    ESP_LOGI(BLE_TAG, "dhf_play_once: 开始解析 DHF%d（OGG同步解析+push队列，耗时较长）", idx + 1);
+    Application::GetInstance().PlaySound(DHF_SOUNDS[idx]);
+    ESP_LOGI(BLE_TAG, "dhf_play_once: DHF%d 解析完成（后续播放由OpusCodec/AudioOutput任务处理）", idx + 1);
+    vTaskDelete(nullptr);  // 一次性任务：解析完成后自删
+}
+
+// 切歌 worker 任务：阻塞在队列上，收到请求执行"停止+LED启动+创建解析任务"后立即回队列
+// —— 关键：Worker 绝不自己跑 PlaySound（耗时几秒），最多200ms就回xQueueReceive接新键
+static void sound_switch_worker_task(void* arg) {
+    (void)arg;
+    ESP_LOGI(BLE_TAG, "切歌worker任务已启动");
+    uint8_t dummy;
+    while (true) {
+        // 阻塞等待切歌请求（INDEFINITE=永久等）
+        if (xQueueReceive(sound_switch_queue_, &dummy, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        ESP_LOGI(BLE_TAG, "worker: 处理切歌请求，当前索引=%d", dhf_sound_index_ + 1);
+        // 1. 完全停止上一首（多轮清队列，截断解码/输出残留）≈200ms
+        stop_all_sound_playback();
+        // 2. 停止旧的LED闪烁任务（如果有），保存新的原LED状态并重新启动闪烁（非阻塞≈0ms）
+        start_led_blink_if_needed();
+        // 3. 创建一次性任务执行耗时的 PlaySound(OGG解析)，Worker 自己立即回队列
+        //    —— 把"此刻的索引值"通过 arg 传进去，避免后续按键覆盖全局导致播放错歌
+        const int idx_snapshot = dhf_sound_index_;
+        BaseType_t ret = xTaskCreate(dhf_play_once_task, "dhf_play", 4096,
+                                     (void*)(intptr_t)idx_snapshot, 5, nullptr);
+        if (ret != pdPASS) {
+            ESP_LOGE(BLE_TAG, "创建dhf_play_once任务失败: %d，降级Worker同步解析", ret);
+            // 极端降级：Worker 自己同步跑 PlaySound（虽然会短暂阻塞，但至少保证功能）
+            Application::GetInstance().PlaySound(DHF_SOUNDS[idx_snapshot]);
+        }
+        // 立即回 xQueueReceive，等待下一次按键请求
+        ESP_LOGI(BLE_TAG, "worker: 切歌调度完成，已回到接收队列等待新按键");
+    }
+}
+
+// 在初始化阶段调用：创建队列 + worker 任务
+static void sound_switch_init_async() {
+    sound_switch_queue_ = xQueueCreate(1, sizeof(uint8_t));
+    if (sound_switch_queue_ == nullptr) {
+        ESP_LOGE(BLE_TAG, "创建切歌队列失败");
+        return;
+    }
+    BaseType_t ret = xTaskCreate(sound_switch_worker_task, "sound_sw", 4096, nullptr, 6, &sound_switch_task_handle_);
+    if (ret != pdPASS) {
+        ESP_LOGE(BLE_TAG, "创建切歌worker任务失败: %d", ret);
+        vQueueDelete(sound_switch_queue_);
+        sound_switch_queue_ = nullptr;
+    }
+}
+
+// BLE 回调中调用：最轻量，立即返回，不阻塞 BLE 任务
+static void sound_switch_request_async() {
+    if (sound_switch_queue_ == nullptr) {
+        ESP_LOGW(BLE_TAG, "切歌队列未初始化，同步降级处理");
+        // 极端降级（不应该发生）：同步处理（此时会短暂阻塞 BLE 但保证功能正确）
+        stop_all_sound_playback();
+        start_led_blink_if_needed();
+        Application::GetInstance().PlaySound(DHF_SOUNDS[dhf_sound_index_]);
+        return;
+    }
+    uint8_t dummy = 1;
+    // xQueueOverwrite: 长度=1的队列，新值覆盖旧值，不阻塞；快速连按保证响应最后一次
+    xQueueOverwrite(sound_switch_queue_, &dummy);
+}
+
+// LED闪烁任务：只要音频服务不是Idle状态，就周期性翻转LAMP_GPIO
+// ---- 修复：使用"先闪后检查"+代次取代机制，避免切歌时IsIdle短暂为true导致立即自杀 ----
+static void led_blink_task(void* arg) {
+    (void)arg;
+    // 保存本任务创建时的闪烁代次快照
+    const uint32_t my_gen = blink_generation_;
+    bool blink_state = true;  // 先亮
+    ESP_LOGI(BLE_TAG, "LED闪烁任务启动(gen=%u)，间隔=%dms",
+             (unsigned)my_gen, LED_BLINK_INTERVAL_MS);
+
+    while (true) {
+        /* ========== 1. 先立即执行闪烁动作（先做事！即使 IsIdle 短暂 true 也先闪一次）========== */
+        gpio_set_level(LAMP_GPIO, blink_state ? 1 : 0);
+        blink_state = !blink_state;
+
+        /* ========== 2. Delay 让出 CPU（此时闪烁已发生/PlaySound可同步推队列）========== */
+        vTaskDelay(pdMS_TO_TICKS(LED_BLINK_INTERVAL_MS));
+
+        /* ========== 3. Delay 之后再检查 3 个停止条件（满足任一立即退出）========== */
+        // 条件A: 闪烁代次变了 → 被新切歌任务取代，立即退（不恢复LED，新任务会接手）
+        if (blink_generation_ != my_gen) {
+            ESP_LOGI(BLE_TAG, "LED(gen=%u)被新任务(gen=%u)取代，退出",
+                     (unsigned)my_gen, (unsigned)blink_generation_);
+            break;
+        }
+        // 条件B: 外部强制停止标志
+        if (!led_blink_running_) {
+            ESP_LOGI(BLE_TAG, "LED(gen=%u)被外部stop停止", (unsigned)my_gen);
+            break;
+        }
+        // 条件C: 音频播放完毕（此时至少经过一个闪烁间隔，PlaySound早已推完首包队列，
+        //         若仍然IsIdle才是真正播放完，而非切歌中间的瞬态）
+        auto& audio_svc = Application::GetInstance().GetAudioService();
+        if (audio_svc.IsIdle()) {
+            ESP_LOGI(BLE_TAG, "音频播放完毕，停止LED闪烁(gen=%u)", (unsigned)my_gen);
+            break;
+        }
+    }
+
+    // 恢复原状态前必须先确认"本代次仍然有效"——若被新任务取代，
+    // 新任务已保存新的 prev_lamp_on 并自行闪烁，此处不能乱恢复（会和新任务抢GPIO）
+    if (blink_generation_ == my_gen) {
+        gpio_set_level(LAMP_GPIO, led_blink_prev_lamp_on_ ? 1 : 0);
+        ESP_LOGI(BLE_TAG, "LED(gen=%u)恢复原状态（%s）",
+                 (unsigned)my_gen, led_blink_prev_lamp_on_ ? "ON" : "OFF");
+        led_blink_running_ = false;
+    }
+    // 清handle标志（stop函数据此判断任务退出）
+    led_blink_task_handle_ = nullptr;
+    vTaskDelete(nullptr);
+}
+
+// 停止LED闪烁（非阻塞！——避免阻塞worker任务，LED任务将在下一次循环检测时自行退出）
+static void stop_led_blink_if_running() {
+    // 仅置标志即可，LED任务下次循环检查代次/running_时会立即退出
+    // 最多等待 LED_BLINK_INTERVAL_MS（闪烁1次的时间）——对worker无影响
+    led_blink_running_ = false;
+}
+
+// 启动LED闪烁（若已有任务在运行，通过代次+1让旧任务自行退出，新任务立即接手闪烁）
+static void start_led_blink_if_needed() {
+    // 停止旧任务（非阻塞置标志）
+    stop_led_blink_if_running();
+    // ---- 关键：代次+1，旧任务即使还在vTaskDelay中，返回后会立即检测到退出 ----
+    //            这样无需等待旧任务退出，也不会出现两个任务同时闪的乱序
+    blink_generation_++;
+    // 保存此刻（切歌完成、新歌即将播放时）的LED状态作为新歌播放完的恢复基准
+    led_blink_prev_lamp_on_ = (gpio_get_level(LAMP_GPIO) == 1);
+    led_blink_running_ = true;
+    BaseType_t ret = xTaskCreate(led_blink_task, "led_blink", 2048, nullptr, 5, &led_blink_task_handle_);
+    if (ret != pdPASS) {
+        ESP_LOGE(BLE_TAG, "创建LED闪烁任务失败: %d", ret);
+        led_blink_running_ = false;
+        led_blink_task_handle_ = nullptr;
+    }
+}
+
+/* ========================================================================
  *  键值定义（协议: [0x55][0x52][键值][0x5B]，键值为第3字节）
  *  根据你实际按键收到的值修改
  * ======================================================================== */
@@ -69,6 +332,8 @@ static const char *BLE_TAG = "BLE_REMOTE";
 #define KEY_DOWN      0x02
 #define KEY_LEFT      0x03
 #define KEY_RIGHT     0x04
+#define KEY_LAMP_ON    0x05  //灯光开关
+#define KEY_SOUND_ON   0x06  //声音开关
 
 /***** 蓝牙遥控 -end *****/
 
@@ -163,10 +428,10 @@ private:
     }
 
     void InitializeLamp() {
-        // 灯（IO16）输出，默认关闭
+        // 灯（IO16）配置为输入输出双向（输出驱动LED，输入可读取当前电平）
         gpio_config_t io_conf = {};
         io_conf.pin_bit_mask = (1ULL << LAMP_GPIO);
-        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.mode = GPIO_MODE_INPUT_OUTPUT;
         io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.intr_type = GPIO_INTR_DISABLE;
@@ -380,6 +645,19 @@ private:
             SendMotionFrame(MOTION_CMD_RIGHT);
             break;
 
+        case KEY_LAMP_ON:
+            ESP_LOGE(BLE_TAG, ">>> LAMP_ON 按下");
+            static_cast<YcscEsp32S3Es8311Dhf&>(Board::GetInstance()).ToggleLamp();
+            break;
+
+        case KEY_SOUND_ON:
+            // ===== 关键：此处运行在 NimBLE 主机任务，绝对不能阻塞 =====
+            // 只做索引递增（原子）+ 发送异步请求，立即返回
+            dhf_sound_index_ = (dhf_sound_index_ + 1) % DHF_SOUND_COUNT;
+            ESP_LOGE(BLE_TAG, ">>> SOUND_ON 按下，准备播放 DHF%d（异步处理）", dhf_sound_index_ + 1);
+            sound_switch_request_async();
+            break;
+
         case KEY_DOWN:
             ESP_LOGE(BLE_TAG, ">>> DOWN 按下");
             SendMotionFrame(MOTION_CMD_BACKWARD);
@@ -462,7 +740,7 @@ public:
 
         InitializeTools();
         InitializeMotionUart();
-        SendMotionFrame(MOTION_CMD_FORWARD);
+        // SendMotionFrame(MOTION_CMD_FORWARD);
         GetBacklight()->RestoreBrightness();
 
         /***** 蓝牙遥控 -begin *****/
@@ -478,6 +756,8 @@ public:
             ESP_LOGE(BLE_TAG, "ble_remote_init failed: %s", esp_err_to_name(ret));
             return;
         }
+        /* 创建切歌异步处理队列 + Worker 任务（必须在回调注册后使用）*/
+        sound_switch_init_async();
         /***** 蓝牙遥控 -end *****/
     }
 

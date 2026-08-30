@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -145,6 +146,10 @@ private:
     esp_timer_handle_t audio_power_timer_ = nullptr;
     std::chrono::steady_clock::time_point last_input_time_;
     std::chrono::steady_clock::time_point last_output_time_;
+
+    // 用于中止正在进行的 PlaySound() 调用。
+    // ResetDecoder() 递增此值，PlaySound() 内部每推一包前检查代次是否变化，变化则立即退出。
+    std::atomic<uint32_t> sound_generation_{0};
 
     void AudioInputTask();
     void AudioOutputTask();

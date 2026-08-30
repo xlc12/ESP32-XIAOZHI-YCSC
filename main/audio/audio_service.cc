@@ -476,7 +476,7 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         return;
     }
 
-    ESP_LOGD(TAG, "%s wake word detection", enable ? "Enabling" : "Disabling");
+    ESP_LOGE(TAG, "%s wake word detection", enable ? "Enabling" : "Disabling");
     if (enable) {
         if (!wake_word_initialized_) {
             if (!wake_word_->Initialize(codec_)) {
@@ -540,6 +540,9 @@ void AudioService::SetCallbacks(AudioServiceCallbacks& callbacks) {
 }
 
 void AudioService::PlaySound(const std::string_view& ogg) {
+    // 记录本次调用的代次，ResetDecoder() 会递增该值用于中止本次 PlaySound
+    const uint32_t gen = sound_generation_.load();
+
     if (!codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
@@ -562,6 +565,12 @@ void AudioService::PlaySound(const std::string_view& ogg) {
     int sample_rate = 16000; // 默认值
 
     while (true) {
+        // 每开始解析下一个 OGG page 前也检查代次，尽早退出
+        if (sound_generation_.load() != gen) {
+            ESP_LOGW(TAG, "PlaySound aborted at page boundary: generation changed (%u -> %u)",
+                     gen, sound_generation_.load());
+            return;
+        }
         size_t pos = find_page(offset);
         if (pos == static_cast<size_t>(-1)) break;
         offset = pos;
@@ -626,6 +635,12 @@ void AudioService::PlaySound(const std::string_view& ogg) {
             }
 
             // Audio packet (Opus)
+            // 推包前检查代次是否变化，若被 ResetDecoder() 标记则立即中止，避免清空队列后继续推入
+            const uint32_t cur_gen = sound_generation_.load();
+            if (cur_gen != gen) {
+                ESP_LOGW(TAG, "PlaySound aborted: generation changed (%u -> %u)", gen, cur_gen);
+                return;
+            }
             auto packet = std::make_unique<AudioStreamPacket>();
             packet->sample_rate = sample_rate;
             packet->frame_duration = 60;
@@ -644,13 +659,25 @@ bool AudioService::IsIdle() {
 }
 
 void AudioService::ResetDecoder() {
-    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
-    opus_decoder_->ResetState();
-    timestamp_queue_.clear();
-    audio_decode_queue_.clear();
-    audio_playback_queue_.clear();
-    audio_testing_queue_.clear();
-    audio_queue_cv_.notify_all();
+    // 先递增代次，标记任何正在进行的 PlaySound() 调用自行退出
+    sound_generation_++;
+
+    {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        opus_decoder_->ResetState();
+        timestamp_queue_.clear();
+        audio_decode_queue_.clear();
+        audio_playback_queue_.clear();
+        audio_testing_queue_.clear();
+        audio_queue_cv_.notify_all();
+    }
+
+    // 禁用再重新启用输出：刷新 codec/I2S 内部正在播放的 PCM 数据，立即静音
+    if (codec_ != nullptr && codec_->output_enabled()) {
+        codec_->EnableOutput(false);
+        // 稍作延时确保 codec 停止输出，再重新使能（下次播放会自动开启）
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
 }
 
 void AudioService::CheckAndUpdateAudioPowerState() {
