@@ -543,6 +543,15 @@ void AudioService::PlaySound(const std::string_view& ogg) {
     // 记录本次调用的代次，ResetDecoder() 会递增该值用于中止本次 PlaySound
     const uint32_t gen = sound_generation_.load();
 
+    // 防御性检查：AudioService::Initialize() 尚未被调用时 codec_ 为 nullptr，
+    // 此时任何 PlaySound() 调用都会空指针解引用 (EXCVADDR=0x0000000F)
+    // → Guru Meditation LoadProhibited。直接跳过并记录日志，方便定位初始化时序问题。
+    if (codec_ == nullptr) {
+        ESP_LOGE(TAG, "PlaySound called before AudioService::Initialize() — codec_ is null, skipped (ogg size=%zu)",
+                 ogg.size());
+        return;
+    }
+
     if (!codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);

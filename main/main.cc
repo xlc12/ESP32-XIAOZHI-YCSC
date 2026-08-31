@@ -12,6 +12,9 @@
 
 extern "C" void app_main(void)
 {
+    //设置io45为输出模式，并且设置为低电平
+    gpio_set_direction(GPIO_NUM_45, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_NUM_45, 0);
     // Initialize the default event loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
