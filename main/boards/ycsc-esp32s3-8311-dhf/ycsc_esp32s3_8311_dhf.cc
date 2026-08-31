@@ -481,7 +481,7 @@ private:
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
-                EnterWifiConfigMode();
+                ResetWifiConfiguration();
                 return;
             }
             app.ToggleChatState();
@@ -811,7 +811,7 @@ private:
             ESP_LOGI(TAG, "按键唤醒，正常启动");
         }
 
-        power_save_timer_ = new PowerSaveTimer(-1, 20, 60);//600秒,10分钟
+        power_save_timer_ = new PowerSaveTimer(-1, 20, 600);//600秒,10分钟
         power_save_timer_->OnEnterSleepMode([this]() {
 
             auto display = GetDisplay();
