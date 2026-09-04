@@ -444,6 +444,7 @@ private:
     i2c_master_bus_handle_t i2c_bus_;
     Button boot_button_;
     Button lamp_button_;
+    Button audio_play_button_;
     bool lamp_on_ = false;
     Display* display_;
     light_mode_t light_mode_ = LIGHT_MODE_ALWAYS_ON;
@@ -479,12 +480,28 @@ private:
 
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
+            //日志：BOOT 按键按下，重置配置并启动设备
+            ESP_LOGI(BLE_TAG, ">>> BOOT 按键按下11111111111111111");
+            power_save_timer_->WakeUp();
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 ResetWifiConfiguration();
                 return;
             }
             app.ToggleChatState();
+        });
+
+        boot_button_.OnPressDown([this]() {
+            ESP_LOGI(BLE_TAG, ">>> BOOT 1111111111122222222222222222");
+            power_save_timer_->WakeUp();
+        });
+
+        // 音频播放按键（GPIO 48）：与 KEY_SOUND_ON 相同的功能——循环切换 DHF1~DHF11 音效
+        audio_play_button_.OnClick([this]() {
+            power_save_timer_->WakeUp();
+            dhf_sound_index_ = (dhf_sound_index_ + 1) % DHF_SOUND_COUNT;
+            ESP_LOGI(BLE_TAG, ">>> AUDIO_PLAY 按键按下，准备播放 DHF%d（异步处理）", dhf_sound_index_ + 1);
+            sound_switch_request_async();
         });
     }
 
@@ -510,6 +527,7 @@ private:
 
         // 按键（IO48）：按一次亮，再按一次灭
         lamp_button_.OnClick([this]() {
+            power_save_timer_->WakeUp();
             ToggleLamp();
         });
     }
@@ -612,13 +630,15 @@ private:
         // 运动控制 MCP 工具：供语音/AI 调用，action 参数控制前后左右和停止
         mcp_server.AddTool(
             "self.motion.control",
-            "控制设备运动。action 可选值：forward(前进)、backward(后退)、left(左转)、right(右转)、stop(停止)。"
-            "每次调用发送一帧对应指令。"
-            "当用户要求跳舞或表演时，自己组合10个动作。",
+            "控制设备/机器人的运动移动，适用于前进、后退、左转、右转、停止等场景。"
+            "当用户说以下内容时必须调用：往前走、向前走、开过去、前进、后退、往后退、倒回去、左转、向左转、向右转、右转、转个弯、停下、停止、站住、别跑了、刹车等。"
+            "参数 action 可选值：forward（前进/向前走）、backward（后退/向后退）、left（左转/向左转）、right（右转/向右转）、stop（停止/停下/刹车）。"
+            "注意：每次调用只发送一次动作指令，若需要持续移动或执行舞蹈表演，需连续多次调用本工具，每次调用之间可适当交替使用 forward/backward/left/right 组合出 10 步以上的舞蹈动作序列。",
             PropertyList({
                 Property("action", kPropertyTypeString, std::string("stop"))
             }),
             [this](const PropertyList& properties) -> ReturnValue {
+                power_save_timer_->WakeUp();
                 std::string action = properties["action"].value<std::string>();
 
                 motion_command_t cmd = MOTION_CMD_STOP;
@@ -652,6 +672,7 @@ private:
             "打开灯",
             PropertyList(),
             [this](const PropertyList& properties) -> ReturnValue {
+                power_save_timer_->WakeUp();
                 SetLamp(true);
                 return true;
             });
@@ -661,6 +682,7 @@ private:
             "关闭灯",
             PropertyList(),
             [this](const PropertyList& properties) -> ReturnValue {
+                power_save_timer_->WakeUp();
                 SetLamp(false);
                 return true;
             });
@@ -670,6 +692,7 @@ private:
             "切换灯的亮灭状态",
             PropertyList(),
             [this](const PropertyList& properties) -> ReturnValue {
+                power_save_timer_->WakeUp();
                 ToggleLamp();
                 return lamp_on_;
             });
@@ -692,6 +715,9 @@ private:
     static void on_key_event(const ble_remote_key_event_t *event)
     {
         ESP_LOGI(BLE_TAG, "key=0x%02X (raw len=%u)", (unsigned)event->key_code, event->raw_len);
+
+        // BLE 任意按键都重置省电定时器（喂狗），避免用户操作时误判无人操作
+        static_cast<YcscEsp32S3Es8311Dhf&>(Board::GetInstance()).power_save_timer_->WakeUp();
 
         switch (event->key_code) {
         case KEY_STOP:
@@ -811,7 +837,7 @@ private:
             ESP_LOGI(TAG, "按键唤醒，正常启动");
         }
 
-        power_save_timer_ = new PowerSaveTimer(-1, 20, 60);//600秒,10分钟
+        power_save_timer_ = new PowerSaveTimer(-1, 20, 600);//600秒,10分钟
         power_save_timer_->OnEnterSleepMode([this]() {
 
             auto display = GetDisplay();
@@ -829,11 +855,29 @@ private:
             ESP_LOGI(TAG, "省电管理：准备进入深度睡眠，先播放关机提示音 DHF11");
             start_led_blink_if_needed();
             Application::GetInstance().PlaySound(Lang::Sounds::OGG_DHF11);
-            // 等待提示音播放完成
+
+           
             
+
+            // 等待提示音播放完成         
             vTaskDelay(4000 / portTICK_PERIOD_MS);
+
+             // 关闭音频功放
+            gpio_set_level(AUDIO_CODEC_PA_PIN, 0);
+
+            // 停止电机
+            SendMotionFrame(MOTION_CMD_STOP);
+
+            //关闭led闪烁灯LAMP_GPIO
+            gpio_set_level(LAMP_GPIO, 0);
+
+            vTaskDelay(500 / portTICK_PERIOD_MS);
+
+            gpio_set_level(LAMP_GPIO, 0);
+            stop_led_blink_if_running();
             //设置IO45为高电平
             gpio_set_level(SHUTDOWN_GPIO, 1);
+            gpio_set_level(LAMP_GPIO, 0);
             
         });
 
@@ -841,7 +885,7 @@ private:
     }
 
 public:
-    YcscEsp32S3Es8311Dhf() : boot_button_(BOOT_BUTTON_GPIO), lamp_button_(LAMP_BUTTON_GPIO) {
+    YcscEsp32S3Es8311Dhf() : boot_button_(BOOT_BUTTON_GPIO), lamp_button_(LAMP_BUTTON_GPIO), audio_play_button_(AUDIO_PLAY_BUTTON_GPIO) {
         // 注意：此处禁止直接调 PlaySound()！Board 构造阶段 AudioService.codec_
         // 尚未赋值（Es8311 实例在 Board 构造返回后、Application::Start() 后半段
         // 才通过 audio_service_.Initialize() 注入），立即播放会空指针崩溃。
@@ -914,6 +958,13 @@ public:
     virtual Led* GetLed() override {
         static GpioLed led(BUILTIN_LED_GPIO, 0);
         return &led;
+    }
+
+    virtual void SetPowerSaveMode(bool enabled) override {
+        if (!enabled) {
+            power_save_timer_->WakeUp();
+        }
+        WifiBoard::SetPowerSaveMode(enabled);
     }
 
 };

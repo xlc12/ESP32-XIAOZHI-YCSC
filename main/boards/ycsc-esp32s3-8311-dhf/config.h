@@ -19,7 +19,7 @@
 #define AUDIO_CODEC_ES8311_ADDR  ES8311_CODEC_DEFAULT_ADDR
 
 #define BUILTIN_LED_GPIO        GPIO_NUM_8
-#define BOOT_BUTTON_GPIO        GPIO_NUM_48
+#define BOOT_BUTTON_GPIO        GPIO_NUM_21
 
 // 运动控制串口（仅发送，TX 接 IO4）
 #define MOTION_UART_PORT        UART_NUM_1
@@ -28,8 +28,11 @@
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC
 
 // 灯光控制：IO48 按键，按一次亮、再按一次灭，灯由 IO16 控制
-#define LAMP_BUTTON_GPIO        GPIO_NUM_47
+#define LAMP_BUTTON_GPIO        GPIO_NUM_48
 #define LAMP_GPIO               GPIO_NUM_16
+
+//音频播放控制按键
+#define AUDIO_PLAY_BUTTON_GPIO    GPIO_NUM_47
 
 //关机IO45
 #define SHUTDOWN_GPIO             GPIO_NUM_45
@@ -57,7 +60,7 @@ typedef enum {
 #define DISPLAY_MOSI_PIN   GPIO_NUM_14
 
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_15
-#define DISPLAY_RST_PIN       GPIO_NUM_21
+#define DISPLAY_RST_PIN       GPIO_NUM_3
 
 
 
