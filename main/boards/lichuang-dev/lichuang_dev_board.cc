@@ -6,6 +6,7 @@
 #include "config.h"
 #include "i2c_device.h"
 #include "esp32_camera.h"
+#include "led/circular_strip.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -50,7 +51,7 @@ public:
                        AUDIO_I2S_GPIO_WS, 
                        AUDIO_I2S_GPIO_DOUT, 
                        AUDIO_I2S_GPIO_DIN,
-                       GPIO_NUM_NC, 
+                       AUDIO_CODEC_PA_PIN, 
                        AUDIO_CODEC_ES8311_ADDR, 
                        AUDIO_CODEC_ES7210_ADDR, 
                        AUDIO_INPUT_REFERENCE),
@@ -59,11 +60,6 @@ public:
 
     virtual void EnableOutput(bool enable) override {
         BoxAudioCodec::EnableOutput(enable);
-        if (enable) {
-            pca9557_->SetOutputState(1, 1);
-        } else {
-            pca9557_->SetOutputState(1, 0);
-        }
     }
 };
 
@@ -93,14 +89,14 @@ private:
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
 
         // Initialize PCA9557
-        pca9557_ = new Pca9557(i2c_bus_, 0x19);
+        // pca9557_ = new Pca9557(i2c_bus_, 0x19);
     }
 
     void InitializeSpi() {
         spi_bus_config_t buscfg = {};
-        buscfg.mosi_io_num = GPIO_NUM_40;
+        buscfg.mosi_io_num = GPIO_NUM_46;
         buscfg.miso_io_num = GPIO_NUM_NC;
-        buscfg.sclk_io_num = GPIO_NUM_41;
+        buscfg.sclk_io_num = GPIO_NUM_21;
         buscfg.quadwp_io_num = GPIO_NUM_NC;
         buscfg.quadhd_io_num = GPIO_NUM_NC;
         buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
@@ -150,7 +146,7 @@ private:
         ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel));
         
         esp_lcd_panel_reset(panel);
-        pca9557_->SetOutputState(0, 0);
+        // pca9557_->SetOutputState(0, 0);
 
         esp_lcd_panel_init(panel);
         esp_lcd_panel_invert_color(panel, true);
@@ -206,7 +202,7 @@ private:
 
     void InitializeCamera() {
         // Open camera power
-        pca9557_->SetOutputState(2, 0);
+        // pca9557_->SetOutputState(2, 0);
 
         camera_config_t config = {};
         config.ledc_channel = LEDC_CHANNEL_2;  // LEDC通道选择  用于生成XCLK时钟 但是S3不用
@@ -244,9 +240,9 @@ public:
         InitializeI2c();
         InitializeSpi();
         InitializeSt7789Display();
-        InitializeTouch();
+        // InitializeTouch();
         InitializeButtons();
-        InitializeCamera();
+        // InitializeCamera();
 
         GetBacklight()->RestoreBrightness();
     }
@@ -267,8 +263,13 @@ public:
         return &backlight;
     }
 
-    virtual Camera* GetCamera() override {
-        return camera_;
+    // virtual Camera* GetCamera() override {
+    //     return camera_;
+    // }
+
+    virtual Led* GetLed() override {
+        static CircularStrip led(BUILTIN_LED_GPIO, 30);
+        return &led;
     }
 };
 
