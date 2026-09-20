@@ -7,6 +7,7 @@
 #include "i2c_device.h"
 #include "esp32_camera.h"
 #include "led/circular_strip.h"
+#include "pn532.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -71,6 +72,7 @@ private:
     LcdDisplay* display_;
     Pca9557* pca9557_;
     Esp32Camera* camera_;
+    Pn532* nfc_ = nullptr;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -235,6 +237,35 @@ private:
         camera_ = new Esp32Camera(config);
     }
 
+    // 初始化 PN532 NFC 模块并启动后台寻卡任务
+    void InitializeNfc() {
+        nfc_ = new Pn532(PN532_UART_PORT, PN532_UART_TX_PIN, PN532_UART_RX_PIN,
+                         PN532_UART_BAUDRATE);
+
+        // 卡片接入回调（在 PN532 寻卡任务上下文中执行，勿做阻塞操作）
+        nfc_->OnCardDetected([](const Pn532::CardInfo& info) {
+            char uid_str[32] = {0};
+            for (uint8_t i = 0; i < info.uid_len; ++i) {
+                snprintf(uid_str + i * 3, sizeof(uid_str) - i * 3, "%02X ", info.uid[i]);
+            }
+            ESP_LOGI(TAG, "[NFC] 卡片接入 UID=%s", uid_str);
+            ESP_LOGI(TAG, "[NFC] 角色信息(NDEF)=\"%s\"", info.ndef_text.c_str());
+
+            // TODO: 在这里消费 info.ndef_text（角色信息），
+            //       如需切界面或发协议消息，通过主循环派发：
+            //       Application::GetInstance().Schedule([role]() { ... });
+        });
+
+        // 卡片移除回调
+        nfc_->OnCardRemoved([]() {
+            ESP_LOGI(TAG, "[NFC] 卡片已移除");
+
+            // TODO: 在这里处理卡片离开后的逻辑（如恢复默认角色）
+        });
+
+        nfc_->Start();
+    }
+
 public:
     LichuangDevBoard() : boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
@@ -243,6 +274,7 @@ public:
         // InitializeTouch();
         InitializeButtons();
         // InitializeCamera();
+        InitializeNfc();
 
         GetBacklight()->RestoreBrightness();
     }

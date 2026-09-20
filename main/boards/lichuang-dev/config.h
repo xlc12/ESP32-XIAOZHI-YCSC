@@ -2,6 +2,7 @@
 #define _BOARD_CONFIG_H_
 
 #include <driver/gpio.h>
+#include <driver/uart.h>
 
 #define AUDIO_INPUT_SAMPLE_RATE  24000
 #define AUDIO_OUTPUT_SAMPLE_RATE 24000
@@ -60,5 +61,14 @@
 
 #define XCLK_FREQ_HZ 24000000
 
+/* PN532 NFC 模块（UART/HSU 通信）引脚配置
+ *   - TX：ESP32 的发送脚，接 PN532 的 RX
+ *   - RX：ESP32 的接收脚，接 PN532 的 TX
+ *   - 该模块必须为 3.3V 电平，且与 ESP32 共地
+ */
+#define PN532_UART_PORT        UART_NUM_1
+#define PN532_UART_TX_PIN      GPIO_NUM_11   // ESP32 -> PN532 (PN532 RX)
+#define PN532_UART_RX_PIN      GPIO_NUM_12   // PN532 -> ESP32 (PN532 TX)
+#define PN532_UART_BAUDRATE    115200
 
 #endif // _BOARD_CONFIG_H_
