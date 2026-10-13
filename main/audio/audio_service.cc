@@ -391,6 +391,9 @@ void AudioService::OpusCodecTask() {
 }
 
 void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
+    /* opus_decoder_ 会被其它任务使用（如主任务的 ResetDecoder），
+       重建解码器时必须加锁，否则会读到正在销毁/重建中的指针 */
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
     if (opus_decoder_->sample_rate() == sample_rate && opus_decoder_->duration_ms() == frame_duration) {
         return;
     }

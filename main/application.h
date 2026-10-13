@@ -54,6 +54,8 @@ public:
     void ToggleChatState();
     void StartListening();
     void StopListening();
+    // 使用指定的 MAC 地址作为 Device-Id 重新建立 WS 连接（用于 NFC 角色切换）
+    void ReconnectWithMacAddress(const std::string& mac_address);
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
     bool CanEnterSleepMode();

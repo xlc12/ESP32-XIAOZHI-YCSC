@@ -78,13 +78,13 @@
  *   - 该模块必须为 3.3V 电平，且与 ESP32 共地
  */
 #define PN532_UART_PORT        UART_NUM_1
-//第一版
-// #define PN532_UART_TX_PIN      GPIO_NUM_11   // ESP32 -> PN532 (PN532 RX)
-// #define PN532_UART_RX_PIN      GPIO_NUM_12   // PN532 -> ESP32 (PN532 TX)
+// 第一版
+#define PN532_UART_TX_PIN      GPIO_NUM_11   // ESP32 -> PN532 (PN532 RX)
+#define PN532_UART_RX_PIN      GPIO_NUM_12   // PN532 -> ESP32 (PN532 TX)
 
 //第二版
-#define PN532_UART_TX_PIN      GPIO_NUM_12   // ESP32 -> PN532 (PN532 RX)
-#define PN532_UART_RX_PIN      GPIO_NUM_11   // PN532 -> ESP32 (PN532 TX)
+// #define PN532_UART_TX_PIN      GPIO_NUM_12   // ESP32 -> PN532 (PN532 RX)
+// #define PN532_UART_RX_PIN      GPIO_NUM_11   // PN532 -> ESP32 (PN532 TX)
 #define PN532_UART_BAUDRATE    115200
 
 #endif // _BOARD_CONFIG_H_

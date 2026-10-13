@@ -266,6 +266,26 @@ void Application::ToggleChatState() {
     }
 }
 
+void Application::ReconnectWithMacAddress(const std::string& mac_address) {
+    Schedule([this, mac_address]() {
+        if (!protocol_) {
+            return;
+        }
+        // 更新握手时使用的 Device-Id（WebSocket 协议会持久化到 NVS，重启后仍生效）
+        protocol_->SetDeviceId(mac_address);
+        // 断开原有 WS 连接，退到待机状态
+        ESP_LOGI(TAG, "Reconnecting with MAC address: %s", mac_address.c_str());
+        protocol_->CloseAudioChannel();
+        SetDeviceState(kDeviceStateIdle);
+        // 以新的 MAC 地址重新连接，并转为聆听状态
+        SetDeviceState(kDeviceStateConnecting);
+        if (!protocol_->OpenAudioChannel()) {
+            return;
+        }
+        SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+    });
+}
+
 void Application::StartListening() {
     if (device_state_ == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
@@ -280,7 +300,7 @@ void Application::StartListening() {
         ESP_LOGE(TAG, "Protocol not initialized");
         return;
     }
-    
+
     if (device_state_ == kDeviceStateIdle) {
         Schedule([this]() {
             if (!protocol_->IsAudioChannelOpened()) {

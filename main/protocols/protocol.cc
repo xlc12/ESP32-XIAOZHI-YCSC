@@ -41,9 +41,12 @@ void Protocol::SetError(const std::string& message) {
 
 void Protocol::SendAbortSpeaking(AbortReason reason) {
     std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"abort\"";
-    if (reason == kAbortReasonWakeWordDetected) {
-        message += ",\"reason\":\"wake_word_detected\"";
-    }
+    message += ",\"reason\":\"wake_word_detected\"";  //无论是任何打断都标记为wake_word_detected，目的是为了适配服务器特定词打断功能
+
+    // if (reason == kAbortReasonWakeWordDetected) {
+    //     message += ",\"reason\":\"wake_word_detected\"";
+
+    // }
     message += "}";
     SendText(message);
 }

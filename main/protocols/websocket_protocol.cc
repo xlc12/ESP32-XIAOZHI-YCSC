@@ -14,10 +14,20 @@
 
 WebsocketProtocol::WebsocketProtocol() {
     event_group_handle_ = xEventGroupCreate();
+    // 读取持久化的 Device-Id（NFC 角色切换会写入），重启后仍使用同一角色标识
+    Settings settings("websocket", false);
+    device_id_ = settings.GetString("device_id");
 }
 
 WebsocketProtocol::~WebsocketProtocol() {
     vEventGroupDelete(event_group_handle_);
+}
+
+void WebsocketProtocol::SetDeviceId(const std::string& device_id) {
+    device_id_ = device_id;
+    // 持久化到 NVS，重启后依然生效
+    Settings settings("websocket", true);
+    settings.SetString("device_id", device_id);
 }
 
 bool WebsocketProtocol::Start() {
@@ -105,7 +115,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
         websocket_->SetHeader("Authorization", token.c_str());
     }
     websocket_->SetHeader("Protocol-Version", std::to_string(version_).c_str());
-    websocket_->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
+    // Device-Id：优先使用外部指定的标识（如 NFC 角色对应的 MAC），否则用本机 MAC
+    std::string device_id = device_id_.empty() ? SystemInfo::GetMacAddress() : device_id_;
+    websocket_->SetHeader("Device-Id", device_id.c_str());
     websocket_->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {

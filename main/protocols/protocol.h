@@ -73,6 +73,8 @@ public:
     virtual void SendStopListening();
     virtual void SendAbortSpeaking(AbortReason reason);
     virtual void SendMcpMessage(const std::string& message);
+    // 设置握手时使用的设备标识（Device-Id），默认不改变（当前仅 WebSocket 协议使用）
+    virtual void SetDeviceId(const std::string& device_id) {}
 
 protected:
     std::function<void(const cJSON* root)> on_incoming_json_;

@@ -64,7 +64,16 @@ private:
             if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
                 ResetWifiConfiguration();
             }
-            app.ToggleChatState();
+            // app.ToggleChatState();
+        });
+
+        boot_button_.OnPressDown([this]() {
+            ESP_LOGI(TAG, "[BOOT] 按键按下，开始聆听");
+            Application::GetInstance().StartListening();
+        });
+        boot_button_.OnPressUp([this]() {
+            ESP_LOGI(TAG, "[BOOT] 按键松开，停止聆听");
+            Application::GetInstance().StopListening();
         });
 
 #if CONFIG_USE_DEVICE_AEC
@@ -77,7 +86,7 @@ private:
 #endif
 
         button2_.OnClick([this]() {
-            ESP_LOGI(TAG, "Button2 clicked");
+            Application::GetInstance().ToggleChatState();
         });
     }
 
@@ -137,9 +146,20 @@ private:
             ESP_LOGI(TAG, "[NFC] 卡片接入 UID=%s", uid_str);
             ESP_LOGI(TAG, "[NFC] 角色信息(NDEF)=\"%s\"", info.ndef_text.c_str());
 
-            // TODO: 在这里消费 info.ndef_text（角色信息），
-            //       如需切界面或发协议消息，通过主循环派发：
-            //       Application::GetInstance().Schedule([role]() { ... });
+            // 根据角色信息切换握手用的 MAC 地址，并重连 WS
+            const char* mac = nullptr;
+            if (info.ndef_text == "普通话") {
+                mac = "AC:A7:04:EB:EC:20";
+            } else if (info.ndef_text == "周杰伦") {
+                mac = "AC:A7:04:EB:E9:C8";
+            } else {
+                ESP_LOGW(TAG, "[NFC] 未识别的角色信息，忽略本次切换: \"%s\"", info.ndef_text.c_str());
+            }
+
+            if (mac != nullptr) {
+                ESP_LOGI(TAG, "[NFC] 切换角色，握手 MAC 改为 %s", mac);
+                Application::GetInstance().ReconnectWithMacAddress(mac);
+            }
         });
 
         // 卡片移除回调
