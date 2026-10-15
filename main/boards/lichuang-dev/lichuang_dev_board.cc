@@ -89,7 +89,7 @@ private:
     LcdDisplay* display_;
     Pn532* nfc_ = nullptr;
     PowerManager* power_manager_;
-    std::string last_card_uid_;   // 上一次已处理的卡片 UID，同一张卡不重复处理
+    std::string last_ndef_text_;   // 上一次已处理的卡片 NDEF 内容，同一张卡不重复处理
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -205,15 +205,14 @@ private:
                 snprintf(uid_str + i * 3, sizeof(uid_str) - i * 3, "%02X ", info.uid[i]);
             }
             ESP_LOGI(TAG, "[NFC] 卡片接入 UID=%s", uid_str);
+            ESP_LOGI(TAG, "[NFC] 读到的地址(NDEF)=\"%s\"", info.ndef_text.c_str());
 
-            // 同一张卡片不重复处理（例如拿走后再刷同一张）
-            if (last_card_uid_ == uid_str) {
+            // 同一张卡片（NDEF 内容相同）不重复处理（例如拿走后再刷同一张）
+            if (!info.ndef_text.empty() && last_ndef_text_ == info.ndef_text) {
                 ESP_LOGI(TAG, "[NFC] 与上次处理的卡片相同，忽略");
                 return;
             }
-            last_card_uid_ = uid_str;
-
-            ESP_LOGI(TAG, "[NFC] 读到的地址(NDEF)=\"%s\"", info.ndef_text.c_str());
+            last_ndef_text_ = info.ndef_text;
 
             // 以卡片内写入的 MAC 地址作为 Device-Id 重连 WS
             std::string mac;
