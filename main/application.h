@@ -78,6 +78,8 @@ private:
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
+    // NFC 角色切换标记：等待旧连接断开后自动以新 Device-Id 重连并进入聆听
+    bool pending_reconnect_ = false;
     AudioService audio_service_;
 
     bool has_server_time_ = false;
@@ -90,6 +92,8 @@ private:
     void CheckNewVersion(Ota& ota);
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
+    // 以当前 Device-Id 重新建立 WS 连接并进入聆听（需在主循环中调用）
+    void ReconnectAndListen();
 };
 
 

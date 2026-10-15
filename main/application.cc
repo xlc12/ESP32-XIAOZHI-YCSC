@@ -273,17 +273,30 @@ void Application::ReconnectWithMacAddress(const std::string& mac_address) {
         }
         // 更新握手时使用的 Device-Id（WebSocket 协议会持久化到 NVS，重启后仍生效）
         protocol_->SetDeviceId(mac_address);
-        // 断开原有 WS 连接，退到待机状态
-        ESP_LOGI(TAG, "Reconnecting with MAC address: %s", mac_address.c_str());
-        protocol_->CloseAudioChannel();
-        SetDeviceState(kDeviceStateIdle);
-        // 以新的 MAC 地址重新连接，并转为聆听状态
-        SetDeviceState(kDeviceStateConnecting);
-        if (!protocol_->OpenAudioChannel()) {
-            return;
+
+        if (protocol_->IsAudioChannelOpened()) {
+            // 断开旧连接。注意：CloseAudioChannel 会触发 OnAudioChannelClosed，
+            // 那里的任务会把状态切回待机；为避免它覆盖随后的聆听状态，
+            // 重连放到该回调里执行（顺序：断开 -> 待机 -> 重连并聆听）
+            pending_reconnect_ = true;
+            protocol_->CloseAudioChannel();
+        } else {
+            // 当前没有可断开的连接，直接以新的 Device-Id 重连并进入聆听
+            ReconnectAndListen();
         }
-        SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
     });
+}
+
+void Application::ReconnectAndListen() {
+    if (!protocol_) {
+        return;
+    }
+    ESP_LOGI(TAG, "Reconnect with new Device-Id, then start listening");
+    SetDeviceState(kDeviceStateConnecting);
+    if (!protocol_->OpenAudioChannel()) {
+        return;
+    }
+    SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
 }
 
 void Application::StartListening() {
@@ -432,6 +445,11 @@ void Application::Start() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
+            // 主动切换角色导致的断开：回到待机后，立即以新的 Device-Id 重连并进入聆听
+            if (pending_reconnect_) {
+                pending_reconnect_ = false;
+                ReconnectAndListen();
+            }
         });
     });
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
