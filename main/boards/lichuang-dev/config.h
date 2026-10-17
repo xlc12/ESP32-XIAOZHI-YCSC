@@ -29,6 +29,9 @@
 #define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_14
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC
 
+// 外接 PWM 调光 LED（高电平点亮）
+#define LIGHT_LED_GPIO          GPIO_NUM_9
+
 // 电池管理
 #define LOW_BATTERY_ALARM_LEVEL 20              // 低电量报警阈值(%)
 #define LOW_BATTERY_ALARM_INTERVAL_MS 20        // 低电量报警间隔时间(秒)

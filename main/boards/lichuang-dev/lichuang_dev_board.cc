@@ -5,6 +5,7 @@
 #include "button.h"
 #include "config.h"
 #include "led/circular_strip.h"
+#include "led_pwm_controller.h"
 #include "pn532.h"
 #include "power_manager.h"
 #include "assets/lang_config.h"
@@ -89,6 +90,7 @@ private:
     LcdDisplay* display_;
     Pn532* nfc_ = nullptr;
     PowerManager* power_manager_;
+    LedPwmController* light_ = nullptr;   // GPIO9 外接 PWM 调光 LED
     std::string last_ndef_text_;   // 上一次已处理的卡片 NDEF 内容，同一张卡不重复处理
 
     void InitializeI2c() {
@@ -246,6 +248,12 @@ private:
         power_manager_->InitializeMcpTools();
     }
 
+    // 外接 PWM 调光 LED（GPIO9），并注册 self.light.* 本地 MCP 工具
+    void InitializeLight() {
+        light_ = new LedPwmController(LIGHT_LED_GPIO);
+        light_->InitializeTools();
+    }
+
 public:
     LichuangDevBoard() : boot_button_(BOOT_BUTTON_GPIO), button2_(BUTTON2_GPIO) {
         InitializeI2c();
@@ -254,6 +262,7 @@ public:
         InitializeButtons();
         InitializeNfc();
         InitializePowerManager();
+        InitializeLight();
 
         GetBacklight()->RestoreBrightness();
     }
@@ -294,6 +303,20 @@ public:
     virtual Led* GetLed() override {
         static CircularStrip led(BUILTIN_LED_GPIO, 30);
         return &led;
+    }
+
+    // 服务器情绪变化时驱动 GPIO9 的呼吸灯
+    virtual void OnEmotionChanged(const char* emotion) override {
+        if (light_ != nullptr) {
+            light_->OnEmotionChanged(emotion);
+        }
+    }
+
+    // 说话期间保持情绪呼吸，说话结束后恢复基础状态
+    virtual void OnSpeakingChanged(bool speaking) override {
+        if (light_ != nullptr) {
+            light_->SetSpeaking(speaking);
+        }
     }
 };
 

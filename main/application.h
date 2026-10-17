@@ -91,6 +91,8 @@ private:
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);
     void ShowActivationCode(const std::string& code, const std::string& message);
+    // 统一更新情绪：驱动显示并通知板级外设（如情绪灯）
+    void UpdateEmotion(const char* emotion);
     void SetListeningMode(ListeningMode mode);
     // 以当前 Device-Id 重新建立 WS 连接并进入聆听（需在主循环中调用）
     void ReconnectAndListen();

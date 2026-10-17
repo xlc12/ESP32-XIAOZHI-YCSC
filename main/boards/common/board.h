@@ -46,6 +46,10 @@ public:
     virtual void StartNetwork() = 0;
     virtual const char* GetNetworkStateIcon() = 0;
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging);
+    // 情绪变化回调：板级可覆写以实现外设联动（如情绪灯）
+    virtual void OnEmotionChanged(const char* emotion) {}
+    // 说话状态回调：板级可覆写（如情绪灯在说话期间持续呼吸）
+    virtual void OnSpeakingChanged(bool speaking) {}
     virtual std::string GetJson();
     virtual void SetPowerSaveMode(bool enabled) = 0;
     virtual std::string GetBoardJson() = 0;

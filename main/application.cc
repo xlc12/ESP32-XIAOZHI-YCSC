@@ -209,7 +209,7 @@ void Application::Alert(const char* status, const char* message, const char* emo
     ESP_LOGW(TAG, "Alert [%s] %s: %s", emotion, status, message);
     auto display = Board::GetInstance().GetDisplay();
     display->SetStatus(status);
-    display->SetEmotion(emotion);
+    UpdateEmotion(emotion);
     display->SetChatMessage("system", message);
     if (!sound.empty()) {
         audio_service_.PlaySound(sound);
@@ -220,9 +220,15 @@ void Application::DismissAlert() {
     if (device_state_ == kDeviceStateIdle) {
         auto display = Board::GetInstance().GetDisplay();
         display->SetStatus(Lang::Strings::STANDBY);
-        display->SetEmotion("neutral");
+        UpdateEmotion("neutral");
         display->SetChatMessage("system", "");
     }
+}
+
+void Application::UpdateEmotion(const char* emotion) {
+    Board::GetInstance().GetDisplay()->SetEmotion(emotion);
+    // 通知板级外设（如情绪灯）
+    Board::GetInstance().OnEmotionChanged(emotion);
 }
 
 void Application::ToggleChatState() {
@@ -494,8 +500,8 @@ void Application::Start() {
         } else if (strcmp(type->valuestring, "llm") == 0) {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
             if (cJSON_IsString(emotion)) {
-                Schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
-                    display->SetEmotion(emotion_str.c_str());
+                Schedule([this, emotion_str = std::string(emotion->valuestring)]() {
+                    UpdateEmotion(emotion_str.c_str());
                 });
             }
         } else if (strcmp(type->valuestring, "mcp") == 0) {
@@ -696,18 +702,18 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
             display->SetStatus(Lang::Strings::STANDBY);
-            display->SetEmotion("neutral");
+            UpdateEmotion("neutral");
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
-            display->SetEmotion("neutral");
+            UpdateEmotion("neutral");
             display->SetChatMessage("system", "");
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
-            display->SetEmotion("neutral");
+            UpdateEmotion("neutral");
 
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
@@ -734,6 +740,12 @@ void Application::SetDeviceState(DeviceState state) {
         default:
             // Do nothing
             break;
+    }
+
+    // 通知板级外设说话状态变化（如情绪灯在说话期间持续呼吸）
+    // 放在 switch 之后：离开说话状态时先设置 neutral 情绪，再结束效果恢复基础状态
+    if ((previous_state == kDeviceStateSpeaking) != (state == kDeviceStateSpeaking)) {
+        board.OnSpeakingChanged(state == kDeviceStateSpeaking);
     }
 }
 
