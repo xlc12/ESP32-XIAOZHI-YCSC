@@ -1,5 +1,6 @@
 #include "audio_service.h"
 #include <esp_log.h>
+#include <cmath>
 #include <cstring>
 
 #if CONFIG_USE_AUDIO_PROCESSOR
@@ -275,6 +276,22 @@ void AudioService::AudioInputTask() {
     ESP_LOGW(TAG, "Audio input task stopped");
 }
 
+void AudioService::ReportOutputLevel(const std::vector<int16_t>& pcm) {
+    if (pcm.empty()) {
+        return;
+    }
+    int64_t sum = 0;
+    for (int16_t sample : pcm) {
+        sum += (int64_t)sample * sample;
+    }
+    float rms = sqrtf((float)sum / pcm.size()) / 32768.0f;
+    // 转成近似对数刻度：-60dB -> 0，0dB -> 100
+    float db = 20.0f * log10f(rms + 1e-6f);
+    int level = (int)((db + 60.0f) * 100.0f / 60.0f);
+    level = level < 0 ? 0 : (level > 100 ? 100 : level);
+    Board::GetInstance().OnAudioLevel((uint8_t)level);
+}
+
 void AudioService::AudioOutputTask() {
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
@@ -293,6 +310,8 @@ void AudioService::AudioOutputTask() {
             esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
             codec_->EnableOutput(true);
         }
+        // 上报播放音量，供板级外设（如情绪灯）跟随语气闪烁
+        ReportOutputLevel(task->pcm);
         codec_->OutputData(task->pcm);
 
         /* Update the last output time */

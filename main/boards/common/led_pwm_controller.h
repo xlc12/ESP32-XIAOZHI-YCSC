@@ -59,6 +59,9 @@ public:
     // 说话状态回调：为 true 时情绪效果持续呼吸不结束，为 false 时结束效果并恢复基础状态
     void SetSpeaking(bool speaking);
 
+    // 播放音量（0-100）：说话期间用来让亮度跟随语气/音节起伏
+    void SetAudioLevel(uint8_t level);
+
     // 暴露情绪映射，便于复用/测试
     static EmotionEffect EffectForEmotion(const char* emotion);
 
@@ -83,6 +86,9 @@ private:
     EmotionEffect effect_ = {};
     int64_t effect_start_us_ = 0;
     bool hold_ = false;   // 说话期间保持效果不结束
+    // 语音音量包络（说话期间调制亮度）
+    uint8_t audio_level_ = 0;
+    float audio_env_ = 0.0f;
 
     TaskHandle_t task_ = nullptr;
 };

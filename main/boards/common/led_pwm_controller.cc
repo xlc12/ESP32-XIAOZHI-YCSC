@@ -203,11 +203,21 @@ void LedPwmController::SetSpeaking(bool speaking) {
     if (!speaking) {
         // 说话结束：不再保持效果，立即结束并恢复基础状态
         effect_active_ = false;
+        audio_level_ = 0;
+        audio_env_ = 0.0f;
         ESP_LOGI(TAG, "Speaking stopped, restore base state (power %s, brightness %u)",
                  power_ ? "on" : "off", (unsigned)brightness_);
     } else {
         ESP_LOGI(TAG, "Speaking started, hold emotion effect");
     }
+}
+
+void LedPwmController::SetAudioLevel(uint8_t level) {
+    if (level > 100) {
+        level = 100;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    audio_level_ = level;
 }
 
 void LedPwmController::SetOutput(uint8_t percent) {
@@ -242,6 +252,13 @@ void LedPwmController::TaskLoop() {
                     float phase = fmodf(t_ms, period_ms) / period_ms;
                     uint32_t cycle = (uint32_t)(t_ms / period_ms);
                     float level = WaveformLevel(effect_.waveform, phase, cycle);
+                    if (hold_) {
+                        // 说话中：叠加实时音量包络，声音大更亮、音节停顿处变暗
+                        // 快起慢落（每 10ms 衰减 6%），避免亮度抖动
+                        float target = audio_level_ * 0.01f;
+                        audio_env_ = target > audio_env_ ? target : audio_env_ * 0.94f;
+                        level *= 0.25f + 0.75f * audio_env_;
+                    }
                     float duty = effect_.min_duty + level * (effect_.max_duty - effect_.min_duty);
                     percent = (uint8_t)(duty + 0.5f);
                 }

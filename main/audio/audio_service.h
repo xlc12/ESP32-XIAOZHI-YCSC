@@ -148,6 +148,7 @@ private:
 
     void AudioInputTask();
     void AudioOutputTask();
+    void ReportOutputLevel(const std::vector<int16_t>& pcm);
     void OpusCodecTask();
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     void SetDecodeSampleRate(int sample_rate, int frame_duration);

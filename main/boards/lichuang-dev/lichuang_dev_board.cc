@@ -318,6 +318,13 @@ public:
             light_->SetSpeaking(speaking);
         }
     }
+
+    // 播放音量变化：让灯光跟随说话的语气/音节起伏
+    virtual void OnAudioLevel(uint8_t level) override {
+        if (light_ != nullptr) {
+            light_->SetAudioLevel(level);
+        }
+    }
 };
 
 DECLARE_BOARD(LichuangDevBoard);

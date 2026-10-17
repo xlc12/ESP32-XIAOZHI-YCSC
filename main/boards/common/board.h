@@ -6,6 +6,7 @@
 #include <mqtt.h>
 #include <udp.h>
 #include <string>
+#include <cstdint>
 #include <network_interface.h>
 
 #include "led/led.h"
@@ -50,6 +51,8 @@ public:
     virtual void OnEmotionChanged(const char* emotion) {}
     // 说话状态回调：板级可覆写（如情绪灯在说话期间持续呼吸）
     virtual void OnSpeakingChanged(bool speaking) {}
+    // 播放音量回调：0-100，板级可覆写（如让灯光跟随语气闪烁）
+    virtual void OnAudioLevel(uint8_t level) {}
     virtual std::string GetJson();
     virtual void SetPowerSaveMode(bool enabled) = 0;
     virtual std::string GetBoardJson() = 0;
