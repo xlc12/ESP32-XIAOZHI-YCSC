@@ -1,4 +1,5 @@
 #include "audio_service.h"
+#include "application.h"
 #include <esp_log.h>
 #include <cstring>
 
@@ -125,7 +126,7 @@ void AudioService::Start() {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->AudioOutputTask();
         vTaskDelete(NULL);
-    }, "audio_output", 2048, this, 4, &audio_output_task_handle_);
+    }, "audio_output", 2048 * 2, this, 4, &audio_output_task_handle_);
 #endif
 
     /* Start the opus codec task */
@@ -265,7 +266,15 @@ void AudioService::AudioInputTask() {
                     audio_processor_->Feed(std::move(data));
                     continue;
                 }
+                /* CI1302 直通模式：codec 无 PCM 输出（上行走 Opus 帧），
+                 * 必须让出 CPU，否则本任务（优先级 8）死循环空转饿死其他任务 */
+                vTaskDelay(pdMS_TO_TICKS(10));
+            } else {
+                /* GetFeedSize==0（AFE 未就绪/1302 直通无 AEC 参考）：等待而非退出任务，
+                 * 避免 AudioInputTask 被"Should not be here"退出导致采集链失效 */
+                vTaskDelay(pdMS_TO_TICKS(10));
             }
+            continue;
         }
 
         ESP_LOGE(TAG, "Should not be here, bits: %lx", bits);
@@ -317,7 +326,10 @@ void AudioService::OpusCodecTask() {
         audio_queue_cv_.wait(lock, [this]() {
             return service_stopped_ ||
                 (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) ||
-                (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE);
+                (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE) ||
+                /* CI1302 直通上行：codec 已有编码好的 Opus 帧，有就转发（跟 VB6824 同模式） */
+                (codec_ != nullptr && codec_->HasUplinkOpusPacket() &&
+                 audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE);
         });
         if (service_stopped_) {
             break;
@@ -354,6 +366,25 @@ void AudioService::OpusCodecTask() {
             debug_statistics_.decode_count++;
         }
         
+        /* Pass-through uplink packets (CI1302: codec 已编码的 Opus 帧，绕过 ESP32 二次编码)
+         * 有帧就转发，不判断设备状态——跟 VB6824 同模式，服务器自己判断要不要处理 */
+        if (codec_ != nullptr && codec_->HasUplinkOpusPacket() &&
+            audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) {
+            std::unique_ptr<AudioStreamPacket> packet;
+            if (codec_->PopUplinkOpusPacket(packet)) {
+                lock.unlock();
+                {
+                    std::lock_guard<std::mutex> qlock(audio_queue_mutex_);
+                    audio_send_queue_.push_back(std::move(packet));
+                }
+                if (callbacks_.on_send_queue_available) {
+                    callbacks_.on_send_queue_available();
+                }
+                debug_statistics_.encode_count++;
+                lock.lock();
+            }
+        }
+
         /* Encode the audio to send queue */
         if (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) {
             auto task = std::move(audio_encode_queue_.front());
@@ -651,6 +682,22 @@ void AudioService::ResetDecoder() {
     audio_playback_queue_.clear();
     audio_testing_queue_.clear();
     audio_queue_cv_.notify_all();
+}
+
+void AudioService::NotifyCodecTask() {
+    audio_queue_cv_.notify_all();
+}
+
+void AudioService::NotifyStreamEnd() {
+    if (codec_ != nullptr) {
+        codec_->NotifyStreamEnd();
+    }
+}
+
+void AudioService::AbortPlayback() {
+    if (codec_ != nullptr) {
+        codec_->AbortPlayback();
+    }
 }
 
 void AudioService::CheckAndUpdateAudioPowerState() {

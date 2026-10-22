@@ -53,6 +53,7 @@ public:
     void AbortSpeaking(AbortReason reason);
     void ToggleChatState();
     void StartListening();
+    void WakeupStartListening();   // CI1302 唤醒专用：进入 Listening 且为 AutoStop 连续对话模式
     void StopListening();
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);

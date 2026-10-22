@@ -462,6 +462,14 @@ config USE_WECHAT_MESSAGE_STYLE
     help
         使用微信聊天界面风格
 
+config AUDIO_CODEC_UART_CI1302
+    bool "Use CI1302 UART Audio Codec"
+    default n
+    depends on BOARD_TYPE_YCSC_ESP32S3_8311_WGXL_CAT
+    help
+        音频输入输出经 UART 由 CI1302 离线语音芯片提供（唤醒/AEC/降噪/VAD 均由 CI1302 完成），
+        选择后自动关闭 ESP32 侧唤醒词与 AFE 音频处理器，下行音频转 MP3 经 UART 送 CI1302 播放。
+
 config USE_ESP_WAKE_WORD
     bool "Enable Wake Word Detection (without AFE)"
     default n
@@ -472,14 +480,14 @@ config USE_ESP_WAKE_WORD
 config USE_AFE_WAKE_WORD
     bool "Enable Wake Word Detection (AFE)"
     default y
-    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM
+    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM && (!AUDIO_CODEC_UART_CI1302)
     help
         需要 ESP32 S3 与 PSRAM 支持
 
 config USE_CUSTOM_WAKE_WORD
     bool "Enable Custom Wake Word Detection"
     default n
-    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM && (!USE_AFE_WAKE_WORD)
+    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM && (!USE_AFE_WAKE_WORD) && (!AUDIO_CODEC_UART_CI1302)
     help
         需要 ESP32 S3 与 PSRAM 支持
         
@@ -508,7 +516,7 @@ config CUSTOM_WAKE_WORD_THRESHOLD
 config USE_AUDIO_PROCESSOR
     bool "Enable Audio Noise Reduction"
     default y
-    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM
+    depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM && (!AUDIO_CODEC_UART_CI1302)
     help
         需要 ESP32 S3 与 PSRAM 支持
 

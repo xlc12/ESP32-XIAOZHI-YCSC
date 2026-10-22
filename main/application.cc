@@ -261,6 +261,7 @@ void Application::ToggleChatState() {
         });
     } else if (device_state_ == kDeviceStateListening) {
         Schedule([this]() {
+            Board::GetInstance().GetAudioCodec()->OnListeningStopped();
             protocol_->CloseAudioChannel();
         });
     }
@@ -291,11 +292,52 @@ void Application::StartListening() {
             }
 
             SetListeningMode(kListeningModeManualStop);
+            Board::GetInstance().GetAudioCodec()->OnListeningStarted();
         });
     } else if (device_state_ == kDeviceStateSpeaking) {
         Schedule([this]() {
             AbortSpeaking(kAbortReasonNone);
             SetListeningMode(kListeningModeManualStop);
+            Board::GetInstance().GetAudioCodec()->OnListeningStarted();
+        });
+    }
+}
+
+void Application::WakeupStartListening() {
+    /* CI1302 唤醒专用入口：与 StartListening 相同，但 listening_mode 用 AutoStop，
+     * 使一轮 AI 回复结束后自动继续聆听（连续对话），无需再次唤醒。
+     * 手动触发（按键等）仍走 StartListening 的 ManualStop（一轮后待机）。 */
+    if (device_state_ == kDeviceStateActivating) {
+        SetDeviceState(kDeviceStateIdle);
+        return;
+    } else if (device_state_ == kDeviceStateWifiConfiguring) {
+        audio_service_.EnableAudioTesting(true);
+        SetDeviceState(kDeviceStateAudioTesting);
+        return;
+    }
+
+    if (!protocol_) {
+        ESP_LOGE(TAG, "Protocol not initialized");
+        return;
+    }
+
+    if (device_state_ == kDeviceStateIdle) {
+        Schedule([this]() {
+            if (!protocol_->IsAudioChannelOpened()) {
+                SetDeviceState(kDeviceStateConnecting);
+                if (!protocol_->OpenAudioChannel()) {
+                    return;
+                }
+            }
+
+            SetListeningMode(kListeningModeAutoStop);
+            Board::GetInstance().GetAudioCodec()->OnListeningStarted();
+        });
+    } else if (device_state_ == kDeviceStateSpeaking) {
+        Schedule([this]() {
+            AbortSpeaking(kAbortReasonNone);
+            SetListeningMode(kListeningModeAutoStop);
+            Board::GetInstance().GetAudioCodec()->OnListeningStarted();
         });
     }
 }
@@ -320,6 +362,7 @@ void Application::StopListening() {
     Schedule([this]() {
         if (device_state_ == kDeviceStateListening) {
             protocol_->SendStopListening();
+            Board::GetInstance().GetAudioCodec()->OnListeningStopped();
             SetDeviceState(kDeviceStateIdle);
         }
     });
@@ -408,6 +451,7 @@ void Application::Start() {
     });
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveMode(true);
+        Board::GetInstance().GetAudioCodec()->OnListeningStopped();
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
@@ -428,11 +472,16 @@ void Application::Start() {
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
+                    // 通知外置 codec（CI1302）：TTS 流结束，结束下行播放数据流（发 PLAY_DATA_END）
+                    audio_service_.NotifyStreamEnd();
                     if (device_state_ == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
                         } else {
                             SetDeviceState(kDeviceStateListening);
+                            /* CI1302：上一轮聆听已在识别结束/打断时发过 0x011B 停录，
+                             * 重新聆听必须重发 0x011A 强制录音（OnListeningStarted 内部有防重） */
+                            Board::GetInstance().GetAudioCodec()->OnListeningStarted();
                         }
                     }
                 });
@@ -630,6 +679,8 @@ void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
     protocol_->SendAbortSpeaking(reason);
+    // 立即停止外置 codec（CI1302）的下行播放，避免残留 MP3 继续播放
+    audio_service_.AbortPlayback();
 }
 
 void Application::SetListeningMode(ListeningMode mode) {

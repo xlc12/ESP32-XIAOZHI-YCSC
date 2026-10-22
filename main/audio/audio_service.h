@@ -107,6 +107,14 @@ public:
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
 
+    // CI1302 直通支持：
+    // 唤醒 OpusCodecTask（codec 收到直通 Opus 帧或 Listening 状态建立时调用）
+    void NotifyCodecTask();
+    // 转发服务器 tts/stop 到 codec，结束外置播放器数据流（1302 发 PLAY_DATA_END）
+    void NotifyStreamEnd();
+    // 打断外置播放器（AbortSpeaking 时调用，1302 发 NET_PLAY_STOP）
+    void AbortPlayback();
+
 private:
     AudioCodec* codec_ = nullptr;
     AudioServiceCallbacks callbacks_;

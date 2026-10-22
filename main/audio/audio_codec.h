@@ -8,12 +8,15 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <memory>
 
 #include "board.h"
 
 #define AUDIO_CODEC_DMA_DESC_NUM 6
 #define AUDIO_CODEC_DMA_FRAME_NUM 240
 #define AUDIO_CODEC_DEFAULT_MIC_GAIN 30.0
+
+class AudioStreamPacket;  // 前置声明，避免与 protocol.h 循环依赖
 
 class AudioCodec {
 public:
@@ -23,6 +26,22 @@ public:
     virtual void SetOutputVolume(int volume);
     virtual void EnableInput(bool enable);
     virtual void EnableOutput(bool enable);
+
+    /* ---- CI1302 / UART 直通扩展接口（默认 no-op，普通 I2S codec 不受影响） ---- */
+    // 上行直通：codec 直接产出已编码的 Opus 帧（如 CI1302 内部 Opus 编码后经串口上传），
+    // AudioService 将绕过 ESP32 侧 Opus 编码，把帧原样打包进上行发送队列。
+    virtual bool HasUplinkOpusPacket() { return false; }
+    virtual bool PopUplinkOpusPacket(std::unique_ptr<AudioStreamPacket>& packet) { return false; }
+
+    // 会话联动：Application 进入/退出 Listening 状态时回调，用于驱动外置语音芯片
+    // （如 CI1302 的强制录音开始/停止、状态机同步）。
+    virtual void OnListeningStarted() {}
+    virtual void OnListeningStopped() {}
+
+    // 下行 TTS 流结束通知（服务器 tts/stop 时回调，codec 据此结束外置播放器的数据流）。
+    virtual void NotifyStreamEnd() {}
+    // 打断当前播放（AbortSpeaking 时回调，codec 据此立即停止外置播放器）。
+    virtual void AbortPlayback() {}
 
     virtual void OutputData(std::vector<int16_t>& data);
     virtual bool InputData(std::vector<int16_t>& data);

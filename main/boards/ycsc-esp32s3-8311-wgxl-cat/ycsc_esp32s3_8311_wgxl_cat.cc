@@ -1,5 +1,6 @@
 #include "wifi_board.h"
 #include "codecs/es8311_audio_codec.h"
+#include "codecs/uart_audio_codec.h"
 #include "display/lcd_display.h"
 #include "application.h"
 #include "button.h"
@@ -427,9 +428,42 @@ public:
     }
 
     virtual AudioCodec* GetAudioCodec() override {
+#if CONFIG_AUDIO_CODEC_UART_CI1302
+         // CI1302 离线语音芯片通过 UART 提供音频输入输出
+         static UartAudioCodec audio_codec(AUDIO_UART_PORT, AUDIO_UART_TX_PIN, AUDIO_UART_RX_PIN, AUDIO_UART_BAUDRATE);
+
+         // 注册唤醒回调：codec 层只负责上报事件，业务逻辑在板级处理（零耦合）
+         static bool wakeup_cb_registered = false;
+         if (!wakeup_cb_registered) {
+             audio_codec.OnWakeUp([]() {
+                 auto& app = Application::GetInstance();
+                 DeviceState st = app.GetDeviceState();
+                 if (st == kDeviceStateIdle || st == kDeviceStateSpeaking) {
+                     app.WakeupStartListening();
+                 }
+             });
+             wakeup_cb_registered = true;
+         }
+
+         // 临时：硬件麦克风偏置电压由 ES8311 的 MICBIAS 引脚提供。
+         // 切到 UART codec 后 ES8311 不再被初始化，MICBIAS 无输出，CI1302 的麦克风无声。
+         // 这里额外保留一个 ES8311 实例并 Start()，打开其输入通道使 MICBIAS 输出电压。
+         // PA 引脚置 GPIO_NUM_NC，避免误开启 ES8311 那一路功放；音频链路仍走 UART，I2S 跑空不影响。
+         static Es8311AudioCodec mic_bias_codec(i2c_bus_, I2C_NUM_0,
+            AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS,
+            AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
+            GPIO_NUM_NC, AUDIO_CODEC_ES8311_ADDR);
+         static bool mic_bias_started = false;
+         if (!mic_bias_started) {
+             mic_bias_codec.Start();
+             mic_bias_started = true;
+         }
+#else
          static Es8311AudioCodec audio_codec(i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
             AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
+#endif
         return &audio_codec;
     }
 

@@ -1,0 +1,517 @@
+
+[2026-10-19 21:07:27.511]
+RX：EFUSE wri麬SR_FE_REDUCE_MEM=1
+sg_voice_roll_frms = 55
+
+g_asrtop_asrfe_dim = 60
+==model_addr = 1513a0
+
+ci_speex_create,Speex frame size: 320
+nn denoie share sram mem size = 19560
+
+nn denoie share tcm mem size = 18440
+
+frame_shift = 512
+
+MOD5
+
+arcs 401,states 168,prunes 124
+TaskName		Priority	TaskNumber	MinStk	13
+init task       	4		1		98
+
+network_send_da 	4		12		390
+
+IDLE            	0		2		99
+
+vad_state_handl 	4		10		166
+
+record_data_upl 	4		11		386
+
+network_recv_da 	4		8		402
+
+audio_in_manage 	4		6		243
+
+decoder_manage_ 	4		5		262
+
+speex_encode_ta 	4		9		758
+
+simple-audio-pl 	4		7		374
+
+UserTaskManageP 	4		13		354
+
+remote call tas 	4		4		194
+
+Tmr Svc         	5		3		90
+
+
+asr heap min free:118KB
+system heap min free:38KB
+system heap free:38KB
+wait asr start done
+inactivate
+
+arcs 36,states 16,prunes 10
+Play start
+
+
+[2026-10-19 21:07:35.130]
+RX：TaskName		Priority	TaskNumber	MinStk	13
+vad_state_handl 	4		10		166
+
+record_data_upl 	4		11		386
+
+init task       	4		1		98
+
+speex_encode_ta 	4		9		758
+
+IDLE            	0		2		98
+
+audio_in_manage 	4		6		210
+
+decoder_manage_ 	4		5		262
+
+network_recv_da 	4		8		402
+
+simple-audio-pl 	4		7		263
+
+network_send_da 	4		12		390
+
+Tmr Svc         	5		3		90
+
+UserTaskManageP 	4		13		310
+
+remote call tas 	4		4		194
+
+
+asr heap min free:58KB
+system heap min free:24KB
+system heap free:31KB
+
+[2026-10-19 21:07:37.385]
+TX：开始唤醒
+[2026-10-19 21:07:38.698]
+RX：NET_PLAY_START.......
+
+===PLAY_DATA_GET
+
+===PLAY_DATA_GET
+
+===PLAY_DATA_GET
+
+pheader->len = 2048
+
+Play start
+
+==decode_one_frame len= 2048
+
+pheader->len = 1408
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 2048
+
+===PLAY_DATA_GET
+
+pheader->len = 432
+
+==decode_one_frame len= 2048
+
+===PLAY_DATA_GET
+
+==decode_one_frame len= 1840
+
+==decode_one_frame len= 1328
+
+pheader->len = 2048
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 2048
+
+===PLAY_DATA_GET
+
+pheader->len = 2048
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 2048
+
+===PLAY_DATA_GET
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 1840
+
+pheader->len = 2048
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 2048
+
+===PLAY_DATA_GET
+
+pheader->len = 2048
+
+==decode_one_frame len= 2048
+
+===PLAY_DATA_GET
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 2048
+
+pheader->len = 448
+
+==decode_one_frame len= 2048
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+==decode_one_frame len= 1776
+
+==decode_one_frame len= 1264
+
+pheader->len = 0
+
+rcv play null data...
+
+==decode_one_frame len= 752
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+===PLAY_DATA_GET
+
+auido paly finish...
+
+pheader->len = 0
+
+pheader->len = 0
+
+rcv err play data
+
+pheader->len = 0
+
+rcv err play data
+
+
+[2026-10-19 21:07:39.509]
+RX：play stop sync state to wifi ....
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+
+[2026-10-19 21:07:42.167]
+RX：NET_PLAY_START.......
+
+===PLAY_DATA_GET
+
+===PLAY_DATA_GET
+
+===PLAY_DATA_GET
+
+pheader->len = 2048
+
+===PLAY_DATA_GET
+
+Play start
+
+==decode_one_frame len= 2048
+
+pheader->len = 1408
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 2048
+
+===PLAY_DATA_GET
+
+==decode_one_frame len= 1920
+
+==decode_one_frame len= 1408
+
+pheader->len = 2048
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 2048
+
+pheader->len = 976
+
+===PLAY_DATA_GET
+
+==decode_one_frame len= 2048
+
+pheader->len = 0
+
+rcv play null data...
+
+==decode_one_frame len= 2048
+
+==decode_one_frame len= 1872
+
+==decode_one_frame len= 1360
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+==decode_one_frame len= 848
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+pheader->len = 0
+
+rcv play null data...
+
+===PLAY_DATA_GET
+
+===PLAY_DATA_GET
+
+auido paly finish...
+
+pheader->len = 0
+
+pheader->len = 0
+
+rcv err play data
+
+pheader->len = 0
+
+rcv err play data
+
+
+[2026-10-19 21:07:42.979]
+RX：play stop sync state to wifi ....
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+===wait audio play over
+
+
+[2026-10-19 21:07:45.119]
+RX：TaskName		Priority	TaskNumber	MinStk	13
+init task       	4		1		98
+
+IDLE            	0		2		98
+
+vad_state_handl 	4		10		166
+
+record_data_upl 	4		11		386
+
+network_recv_da 	4		8		354
+
+audio_in_manage 	4		6		210
+
+decoder_manage_ 	4		5		262
+
+speex_encode_ta 	4		9		746
+
+UserTaskManageP 	4		13		310
+
+network_send_da 	4		12		390
+
+simple-audio-pl 	4		7		263
+
+remote call tas 	4		4		194
+
+Tmr Svc         	5		3		90
+
+
+asr heap min free:58KB
+system heap min free:21KB
+system heap free:31KB
