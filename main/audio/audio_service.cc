@@ -327,7 +327,7 @@ void AudioService::OpusCodecTask() {
             return service_stopped_ ||
                 (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) ||
                 (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE) ||
-                /* CI1302 直通上行：codec 已有编码好的 Opus 帧，有就转发（跟 VB6824 同模式） */
+                /* CI1302：codec 已完成 Speex->Opus 转码，有帧就转发（跟 VB6824 同模式） */
                 (codec_ != nullptr && codec_->HasUplinkOpusPacket() &&
                  audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE);
         });
@@ -366,7 +366,8 @@ void AudioService::OpusCodecTask() {
             debug_statistics_.decode_count++;
         }
         
-        /* Pass-through uplink packets (CI1302: codec 已编码的 Opus 帧，绕过 ESP32 二次编码)
+        /* Pass-through uplink packets (CI1302: codec 内部 Speex 解码 + Opus 编码，
+         * 绕过 ESP32 的 PCM 采集链路)
          * 有帧就转发，不判断设备状态——跟 VB6824 同模式，服务器自己判断要不要处理 */
         if (codec_ != nullptr && codec_->HasUplinkOpusPacket() &&
             audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) {

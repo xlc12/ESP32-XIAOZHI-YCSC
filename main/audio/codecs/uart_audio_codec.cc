@@ -33,6 +33,7 @@ UartAudioCodec::~UartAudioCodec() {
         vTaskDelete(play_task_handle_);
         play_task_handle_ = nullptr;
     }
+    SpeexDeinit();
     if (shine_enc_ != nullptr) {
         shine_close(shine_enc_);
         shine_enc_ = nullptr;
@@ -83,9 +84,17 @@ void UartAudioCodec::Start() {
     if (!Mp3EncoderInit()) {
         ESP_LOGE(TAG, "MP3 encoder init failed");
     }
+    if (!SpeexInit()) {
+        ESP_LOGE(TAG, "Speex decoder init failed");
+    }
 
-    /* 任务栈 8KB：SendFrame 栈上帧缓冲 16+2048B，4KB 栈会溢出（唤醒后 Double exception 根因） */
-    xTaskCreate(RxTaskEntry, "ci1302_rx", 8192, this, 4, &rx_task_handle_);
+    /* RX 任务栈 32KB：该任务除收包解析外还要做 Speex 解码 + Opus 编码。
+     * esp-opus 以 -DUSE_ALLOCA 编译，opus_encode() 的临时区全部走 alloca，
+     * 16kHz/60ms（960 点）单帧实测需要 20KB 以上；8KB 会直接触发栈溢出，
+     * 16KB 仍不够，溢出会向下写穿相邻堆块（覆盖 OpusEncoderWrapper 里的
+     * std::mutex，表现为 Encode 返回时 pthread_mutex_unlock 崩溃）。
+     * 参考：主线小智给做 Opus 编解码的 opus_codec 任务 2048*13=26KB。 */
+    xTaskCreate(RxTaskEntry, "ci1302_rx", 32768, this, 4, &rx_task_handle_);
     xTaskCreate(PlayTaskEntry, "ci1302_play", 8192, this, 4, &play_task_handle_);
 
     /* 下发 VAD 结束判定参数：静音 500ms 判为说完（0x0110 参数 20）。
@@ -203,7 +212,9 @@ void UartAudioCodec::RxTaskLoop() {
         TickType_t now = xTaskGetTickCount();
         if (now - last_beat >= pdMS_TO_TICKS(10000)) {
             last_beat = now;
-            ESP_LOGI(TAG, "rx alive: bytes=%u parse_buf=%u", (unsigned)rx_total, (unsigned)rx_parse_buf_.size());
+            ESP_LOGI(TAG, "rx alive: bytes=%u parse_buf=%u stack_free=%u",
+                     (unsigned)rx_total, (unsigned)rx_parse_buf_.size(),
+                     (unsigned)uxTaskGetStackHighWaterMark(nullptr));
         }
     }
 }
@@ -268,7 +279,7 @@ void UartAudioCodec::DispatchFrame(uint16_t cmd, const uint8_t* payload, uint16_
         OnWakeUpEvent();
         break;
     case CI_CMD_VAD_START:
-        /* 1302 自己 VAD 检测到人声开始，已自动开始推 Opus。仅日志。 */
+        /* 1302 自己 VAD 检测到人声开始，已自动开始推 Speex。仅日志。 */
         ESP_LOGI(TAG, "CI1302 VAD_START");
         break;
     case CI_CMD_LOCAL_ASR_NOTIFY: {
@@ -289,13 +300,19 @@ void UartAudioCodec::DispatchFrame(uint16_t cmd, const uint8_t* payload, uint16_
         ESP_LOGE(TAG, "CI1302 VAD_END");
         break;
     case CI_CMD_PCM_FINISH:
-        /* 1302 VAD 检测到说完了，已停止上传。只记日志，不干预。
-         * 对齐 VB6824 模式：本地不做任何队列清理，服务器自己 VAD 判断。 */
-        ESP_LOGI(TAG, "CI1302 %s", cmd == CI_CMD_VAD_END ? "VAD_END" : "PCM_FINISH");
+        /* 1302 VAD 判定说完了，已停止上传。补齐最后一帧，再补一段静音。
+         * 云端 listen mode=auto 的 VAD 靠「收到静音」判句尾，而 1302 在
+         * VAD_END 之后完全不上传（连静音帧都没有），服务器就永远等不到
+         * 句尾，会把后面几轮话攒成一大段最后一次性提交（表现为一直不结束、
+         * 然后突然识别出一长串重复文本）。 */
+        ESP_LOGI(TAG, "CI1302 PCM_FINISH");
+        FlushUplinkPcm();
+        AppendUplinkSilence();
         break;
     case CI_CMD_PCM_MIDDLE:
-        /* 负载为 CI1302 已编码的 Opus 帧（40ms/16kHz/单声道） */
-        QueueUplinkOpus(payload, len);
+        /* 负载为 Speex 帧：首字节为码流长度（典型 0x2A=42），其后为 42 字节码流。
+         * ESP32 解码为 PCM 后再 Opus 编码上云（小智服务端只接受 Opus）。 */
+        DecodeSpeexAndForward(payload, len);
         break;
     case CI_CMD_EXIT_WAKE_UP:
         ESP_LOGD(TAG, "CI1302 EXIT_WAKE_UP");
@@ -334,7 +351,7 @@ void UartAudioCodec::DispatchFrame(uint16_t cmd, const uint8_t* payload, uint16_
 }
 
 /* ------------------------------------------------------------------ */
-/* 上行：1302 Opus 直通                                                  */
+/* 上行：1302 Speex 解码 -> Opus 编码                                    */
 /* ------------------------------------------------------------------ */
 
 void UartAudioCodec::OnWakeUpEvent() {
@@ -343,6 +360,118 @@ void UartAudioCodec::OnWakeUpEvent() {
     if (wake_up_callback_) {
         wake_up_callback_();
     }
+}
+
+bool UartAudioCodec::SpeexInit() {
+    if (!speex_bits_inited_) {
+        speex_bits_init(&speex_bits_);
+        speex_bits_inited_ = true;
+    }
+    if (speex_dec_ == nullptr) {
+        /* Speex 宽带模式：16kHz，20ms/帧(320 点)，对应 CI1302 的 43 字节上行包 */
+        speex_dec_ = speex_decoder_init(&speex_wb_mode);
+        if (speex_dec_ == nullptr) {
+            return false;
+        }
+        int enh = 1;
+        speex_decoder_ctl(speex_dec_, SPEEX_SET_ENH, &enh);
+        int frame_size = 0;
+        if (speex_decoder_ctl(speex_dec_, SPEEX_GET_FRAME_SIZE, &frame_size) == 0 && frame_size > 0) {
+            speex_frame_samples_ = frame_size;
+        }
+    }
+    if (uplink_opus_encoder_ == nullptr) {
+        uplink_opus_encoder_ = std::make_unique<OpusEncoderWrapper>(
+            UPLINK_SAMPLE_RATE, 1, UPLINK_OPUS_FRAME_MS);
+        uplink_opus_encoder_->SetComplexity(0);
+    }
+    ESP_LOGI(TAG, "Speex WB decoder ready, frame=%d samples", speex_frame_samples_);
+    return true;
+}
+
+void UartAudioCodec::SpeexDeinit() {
+    if (speex_dec_ != nullptr) {
+        speex_decoder_destroy(speex_dec_);
+        speex_dec_ = nullptr;
+    }
+    if (speex_bits_inited_) {
+        speex_bits_destroy(&speex_bits_);
+        speex_bits_inited_ = false;
+    }
+    uplink_opus_encoder_.reset();
+}
+
+void UartAudioCodec::DecodeSpeexAndForward(const uint8_t* payload, uint16_t len) {
+    if (speex_dec_ == nullptr || payload == nullptr || len == 0) {
+        return;
+    }
+
+    /* 启英泰伦协议（cias_speex_compressed_data）：负载首字节为码流长度
+     * （典型 0x2A = 42），其后为 Speex 码流；1302 按 43 字节定长上传，
+     * 码流不足时尾部补 0，因此必须按首字节长度截取，不能直接整包解码。
+     * 若首字节大于 len-1（不可能是长度），则按无长度字节固件兼容处理。 */
+    const uint8_t* data = payload;
+    int data_len = len;
+    if (data_len >= 2 && payload[0] > 1 && payload[0] <= data_len - 1) {
+        data_len = payload[0];
+        ++data;
+    }
+    if (data_len <= 1) {
+        return;
+    }
+
+    /* 每个 PCM_MIDDLE 包恰好携带一帧 Speex（20ms / 320 点），解码一次 */
+    speex_bits_read_from(&speex_bits_, reinterpret_cast<const char*>(data), data_len);
+    std::vector<int16_t> pcm(speex_frame_samples_);
+    int ret = speex_decode_int(speex_dec_, &speex_bits_, pcm.data());
+    if (ret != 0) {
+        ESP_LOGW(TAG, "Speex decode error %d (len=%d)", ret, data_len);
+        return;
+    }
+    EncodeUplinkPcm(std::move(pcm));
+}
+
+void UartAudioCodec::EncodeUplinkPcm(std::vector<int16_t>&& pcm) {
+    if (uplink_opus_encoder_ == nullptr || pcm.empty()) {
+        return;
+    }
+    const int frame_samples = UPLINK_SAMPLE_RATE * UPLINK_OPUS_FRAME_MS / 1000;
+    uplink_pcm_residual_ = (uplink_pcm_residual_ + (int)pcm.size()) % frame_samples;
+    uplink_opus_encoder_->Encode(std::move(pcm), [this](std::vector<uint8_t>&& opus) {
+        QueueUplinkOpus(opus.data(), (uint16_t)opus.size());
+    });
+    /* 首次编码成功后打印一次栈余量（字节）：opus_encode 走 alloca，
+     * 栈消耗随帧长变化，用这个值确认 32KB 是否仍有足够余量。 */
+    if (!uplink_stack_reported_) {
+        uplink_stack_reported_ = true;
+        ESP_LOGI(TAG, "uplink encode ok, rx stack high-water free=%u bytes",
+                 (unsigned)uxTaskGetStackHighWaterMark(nullptr));
+    }
+}
+
+void UartAudioCodec::FlushUplinkPcm() {
+    if (uplink_opus_encoder_ == nullptr || uplink_pcm_residual_ == 0) {
+        return;
+    }
+    const int frame_samples = UPLINK_SAMPLE_RATE * UPLINK_OPUS_FRAME_MS / 1000;
+    std::vector<int16_t> pad(frame_samples - uplink_pcm_residual_, 0);
+    /* 补零凑满 60ms Opus 帧，避免丢失最后不足一帧的语音 */
+    EncodeUplinkPcm(std::move(pad));
+}
+
+void UartAudioCodec::AppendUplinkSilence() {
+    if (uplink_opus_encoder_ == nullptr) {
+        return;
+    }
+    /* 按 60ms 一帧逐步喂，避免一次性分配大块内存；
+     * 采用 1.5s 静音：云端 auto VAD 的静音判决门限各版本不同（经验 0.8~1.2s），
+     * 之前 780ms 时偶尔判不到句尾，会和下一句合并成一段提交。 */
+    const int frame_samples = UPLINK_SAMPLE_RATE * UPLINK_OPUS_FRAME_MS / 1000;
+    const int frames = UPLINK_TAIL_SILENCE_MS / UPLINK_OPUS_FRAME_MS;
+    for (int i = 0; i < frames; i++) {
+        EncodeUplinkPcm(std::vector<int16_t>(frame_samples, 0));
+    }
+    ESP_LOGD(TAG, "Append %d ms silence after VAD end", frames * UPLINK_OPUS_FRAME_MS);
 }
 
 void UartAudioCodec::QueueUplinkOpus(const uint8_t* payload, uint16_t len) {
@@ -363,12 +492,6 @@ void UartAudioCodec::QueueUplinkOpus(const uint8_t* payload, uint16_t len) {
     Application::GetInstance().GetAudioService().NotifyCodecTask();
 }
 
-void UartAudioCodec::ClearUplinkOpusQueue() {
-    if (uplink_opus_queue_ != nullptr) {
-        xQueueReset(uplink_opus_queue_);
-    }
-}
-
 bool UartAudioCodec::HasUplinkOpusPacket() {
     return uplink_opus_queue_ != nullptr && uxQueueMessagesWaiting(uplink_opus_queue_) > 0;
 }
@@ -379,15 +502,15 @@ bool UartAudioCodec::PopUplinkOpusPacket(std::unique_ptr<AudioStreamPacket>& pac
         return false;
     }
     auto pkt = std::make_unique<AudioStreamPacket>();
-    pkt->frame_duration = 40;    /* CI1302 上行 Opus 帧 40ms */
-    pkt->sample_rate = 16000;
-    pkt->timestamp = 0;          /* 直通链路无本地采集时间戳，服务器 AEC 时间戳缺省 */
+    pkt->frame_duration = UPLINK_OPUS_FRAME_MS;  /* ESP32 重新编码后的 Opus 帧 60ms */
+    pkt->sample_rate = UPLINK_SAMPLE_RATE;
+    pkt->timestamp = 0;          /* 转码链路无本地采集时间戳，服务器 AEC 时间戳缺省 */
     pkt->payload.assign(item.data, item.data + item.len);
     packet = std::move(pkt);
     return true;
 }
 
-/* CI1302 直通模式下上行由 Opus 帧完成，不提供 PCM（防止 ESP32 二次编码） */
+/* 上行由 codec 内部完成 Speex 解码与 Opus 编码，不向 AudioService 提供 PCM */
 int UartAudioCodec::Read(int16_t* dest, int samples) {
     return 0;
 }
@@ -464,7 +587,22 @@ void UartAudioCodec::HandlePlayDataGet(uint32_t request) {
     }
 
     uint8_t buf[PLAY_DATA_MAX_CHUNK];
-    size_t got = xStreamBufferReceive(downlink_mp3_sb_, buf, request, pdMS_TO_TICKS(PLAY_DATA_WAIT_MS));
+    /* 攒满 1302 请求的长度再回包：它一次要 1024B，若只回几十字节的碎包，
+     * 芯片立刻再请求、再等一次，等于给播放器喂带空洞的碎流，4KB 预取垫不住会卡顿。
+     * 缓冲暂时不够时最多等 PLAY_DATA_WAIT_MS，超时才退回短包（保持拉流活跃）。 */
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(PLAY_DATA_WAIT_MS);
+    size_t got = 0;
+    while (got < request) {
+        TickType_t now = xTaskGetTickCount();
+        if ((int32_t)(deadline - now) <= 0) {
+            break;
+        }
+        size_t n = xStreamBufferReceive(downlink_mp3_sb_, buf + got, request - got, deadline - now);
+        if (n == 0) {
+            break;  /* 超时，缓冲仍未补上数据 */
+        }
+        got += n;
+    }
     if (got > 0) {
         /* 有数据就回包（即使短包也回，保持 1302 拉流活跃）；绝不回空包 */
         SendFrame(CI_CMD_PLAY_DATA_RECV, buf, got);

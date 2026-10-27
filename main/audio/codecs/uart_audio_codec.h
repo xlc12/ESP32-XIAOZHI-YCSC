@@ -10,26 +10,37 @@
 #include <vector>
 #include <cstdint>
 #include <functional>
+#include <memory>
+
+#include <opus_encoder.h>
 
 extern "C" {
 #include "layer3.h"   // shine MP3 编码器（components/shine）
+#include <speex/speex.h>
+#include <speex/speex_bits.h>
 }
 
 /*
  * UartAudioCodec —— 通过 UART 对接 CI1302 离线语音芯片的 AudioCodec 实现。
  *
- * 设计哲学（对齐 VB6824 模式）：
- *   - 芯片做所有事：唤醒词检测、AEC、降噪、VAD、Opus 编码、MP3 播放
- *   - ESP32 只管收发：上行收到 Opus 帧直通转发，下行收到 PCM 转 MP3 推给芯片
+ * 设计哲学（对齐启英泰伦《离在线应用对接说明 V2.4》）：
+ *   - 芯片做前端：唤醒词检测、AEC、降噪、VAD、Speex 编码、MP3 播放
+ *   - ESP32 做转码：上行 Speex(16k/20ms/43B) 解码为 PCM，再 Opus 编码上云
+ *   - 下行：云端 Opus 解码 PCM → shine 编码 MP3 → 芯片按需拉流播放
  *   - 无会话控制：不干预"什么时候开始录/什么时候停录"，芯片自己 VAD 控制
  *   - 零耦合：codec 层不依赖 Application，所有事件通过回调上报给板级
  *
  * 数据流：
  *  上行（1302 -> ESP32 -> 云端）：
- *    1302 VAD 检测到人声 → 自动开始推 Opus 帧(0x0105 PCM_MIDDLE)
- *    → ESP32 入直通队列 → AudioService 转发到云端（不二次编码）
- *    → 1302 VAD_END → 发 0x0106 PCM_FINISH → ESP32 清队列
- *    → 服务器自己 VAD 检测到无音频 → 提交 STT
+ *    1302 VAD 检测到人声 → 自动开始推 Speex 帧(0x0105 PCM_MIDDLE，
+ *    负载首字节为码流长度 0x2A，其后 42 字节 Speex 宽带码流)
+ *    → ESP32 Speex 解码为 PCM(320 点/帧) → Opus 60ms 编码 → 发送队列
+ *    → 1302 VAD_END → 发 0x0106 PCM_FINISH → ESP32 flush 残帧 + 补 780ms 静音
+ *    → 服务器（listen mode=auto）VAD 收到静音判定句尾 → 提交 STT
+ *
+ *    注意：1302 只在 VAD 有效期内上传，VAD_END 后连静音都不发，而云端
+ *    auto VAD 必须收到静音才会断句，所以这里必须由 ESP32 主动补静音，
+ *    否则会一直不断句、把后续多轮语音攒成一段一次性提交。
  *
  *  下行（云端 -> ESP32 -> 1302）：
  *    云端 Opus 解码 PCM → Write() → shine 编码 MP3 → 缓冲
@@ -58,7 +69,8 @@ public:
     virtual void EnableInput(bool enable) override {}
     virtual void EnableOutput(bool enable) override {}
 
-    /* 上行直通：CI1302 已编码的 Opus 帧 */
+    /* 上行直通：codec 内部把 CI1302 的 Speex 帧转成 Opus 后入队，
+     * AudioService 只负责取帧上云 */
     virtual bool HasUplinkOpusPacket() override;
     virtual bool PopUplinkOpusPacket(std::unique_ptr<AudioStreamPacket>& packet) override;
 
@@ -80,7 +92,7 @@ private:
         CI_CMD_LOCAL_ASR_NOTIFY   = 0x0101,  // 本地语音识别结果通知
         CI_CMD_WAKE_UP            = 0x0102,  // 唤醒
         CI_CMD_VAD_END            = 0x0103,  // VAD 结束
-        CI_CMD_PCM_MIDDLE         = 0x0105,  // PCM 中间包（CI1302 侧 Opus 编码帧）
+        CI_CMD_PCM_MIDDLE         = 0x0105,  // 音频中间包（CI1302 侧 Speex 编码帧）
         CI_CMD_PCM_FINISH         = 0x0106,  // PCM 数据结束包
         CI_CMD_VAD_START          = 0x0108,  // VAD 开始
         CI_CMD_EXIT_WAKE_UP       = 0x0109,  // 退出唤醒
@@ -102,18 +114,25 @@ private:
     static constexpr size_t   CIAS_HEADER_SIZE = 16;
     static constexpr size_t   CIAS_MAX_PAYLOAD = 2048;
 
-    // ---- 上行（1302 Opus 直通）----
+    // ---- 上行（1302 Speex -> 解码 -> Opus 编码上云）----
     static constexpr size_t   UPLINK_OPUS_FRAME_MAX  = 256;
     static constexpr size_t   UPLINK_OPUS_QUEUE_LEN  = 64;
+    static constexpr int      SPEEX_WB_FRAME_SAMPLES = 320;   // 16kHz / 20ms
+    static constexpr int      UPLINK_OPUS_FRAME_MS   = 60;
+    static constexpr int      UPLINK_SAMPLE_RATE     = 16000;
+    static constexpr int      UPLINK_TAIL_SILENCE_MS = 1500;  // VAD_END 后补静音，喂云端 VAD 断句
 
     // ---- 下行（MP3 播放）----
     static constexpr int MP3_SAMPLE_RATE          = 24000;
     static constexpr int MP3_BITRATE              = 48;
     static constexpr size_t DOWNLINK_MP3_BUF_SIZE = 64 * 1024;
     static constexpr uint32_t PLAY_DATA_MAX_CHUNK = 1024;
-    static constexpr size_t   PLAY_PREBUFFER_BYTES     = 8192;
-    static constexpr int      PLAY_PREBUFFER_TIMEOUT_MS = 1500;
-    static constexpr int      PLAY_DATA_WAIT_MS         = 100;
+    /* 起播水位：TTS 是边合成边下发，产出速度略低于 48kbps 的消费速度，
+     * 8KB 预缓冲在一段 3 秒的回复里会被吃到见底，表现为“最后一句卡顿”。
+     * 16KB（≈2.7s 音频）让垫子撑到句尾；短回复由 TIMEOUT 兜底起播。 */
+    static constexpr size_t   PLAY_PREBUFFER_BYTES     = 16384;
+    static constexpr int      PLAY_PREBUFFER_TIMEOUT_MS = 2500;
+    static constexpr int      PLAY_DATA_WAIT_MS         = 200;
     static constexpr int      PLAY_NO_GET_TIMEOUT_MS    = 10000;
     static constexpr int      PLAY_RESTART_TIMEOUT_MS   = 3000;
     static constexpr int      PLAY_RESTART_MAX          = 2;
@@ -132,6 +151,15 @@ private:
     TaskHandle_t rx_task_handle_ = nullptr;
     SemaphoreHandle_t tx_mutex_ = nullptr;
     SemaphoreHandle_t state_mutex_ = nullptr;
+
+    // ---- 上行解码 / 转码 ----
+    void* speex_dec_ = nullptr;
+    SpeexBits speex_bits_ = {};
+    bool speex_bits_inited_ = false;
+    int speex_frame_samples_ = SPEEX_WB_FRAME_SAMPLES;
+    int uplink_pcm_residual_ = 0;   // 待凑满 Opus 帧的 PCM 样本数
+    bool uplink_stack_reported_ = false;  // 首次编码后打印一次栈余量
+    std::unique_ptr<OpusEncoderWrapper> uplink_opus_encoder_;
 
     // ---- 上行直通 ----
     QueueHandle_t uplink_opus_queue_ = nullptr;
@@ -175,8 +203,13 @@ private:
 
     // 上行
     void OnWakeUpEvent();
+    bool SpeexInit();
+    void SpeexDeinit();
+    void DecodeSpeexAndForward(const uint8_t* payload, uint16_t len);
+    void EncodeUplinkPcm(std::vector<int16_t>&& pcm);
+    void FlushUplinkPcm();
+    void AppendUplinkSilence();
     void QueueUplinkOpus(const uint8_t* payload, uint16_t len);
-    void ClearUplinkOpusQueue();
 
     // 下行
     static void PlayTaskEntry(void* arg);

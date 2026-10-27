@@ -28,8 +28,9 @@ public:
     virtual void EnableOutput(bool enable);
 
     /* ---- CI1302 / UART 直通扩展接口（默认 no-op，普通 I2S codec 不受影响） ---- */
-    // 上行直通：codec 直接产出已编码的 Opus 帧（如 CI1302 内部 Opus 编码后经串口上传），
-    // AudioService 将绕过 ESP32 侧 Opus 编码，把帧原样打包进上行发送队列。
+    // 上行直通：codec 直接产出已编码的 Opus 帧（如 CI1302 经串口上传 Speex，
+    // codec 内部解码并重新 Opus 编码），AudioService 绕过 ESP32 侧 PCM 编码链路，
+    // 把帧原样打包进上行发送队列。
     virtual bool HasUplinkOpusPacket() { return false; }
     virtual bool PopUplinkOpusPacket(std::unique_ptr<AudioStreamPacket>& packet) { return false; }
 

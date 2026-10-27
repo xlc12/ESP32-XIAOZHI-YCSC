@@ -479,8 +479,8 @@ void Application::Start() {
                             SetDeviceState(kDeviceStateIdle);
                         } else {
                             SetDeviceState(kDeviceStateListening);
-                            /* CI1302：上一轮聆听已在识别结束/打断时发过 0x011B 停录，
-                             * 重新聆听必须重发 0x011A 强制录音（OnListeningStarted 内部有防重） */
+                            /* CI1302：录音启停由 1302 原厂 VAD 控制，这里只通知 codec
+                             * 进入聆听态（UartAudioCodec 为空实现，不下发录音命令） */
                             Board::GetInstance().GetAudioCodec()->OnListeningStarted();
                         }
                     }
@@ -596,6 +596,13 @@ void Application::MainEventLoop() {
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+                /* protocol_ 要等 StartNetwork()/OTA 检查之后才创建（开机约 8s），
+                 * 而 CI1302 在开机提示音阶段就可能上报 VAD 音频并触发本事件，
+                 * 此时 protocol_ 仍为空，直接解引用会导致开机 LoadProhibited 重启。
+                 * 通道未就绪就丢弃这些帧（continue 继续排空队列，避免反复唤醒）。 */
+                if (protocol_ == nullptr) {
+                    continue;
+                }
                 if (!protocol_->SendAudio(std::move(packet))) {
                     break;
                 }

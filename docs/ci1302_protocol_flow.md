@@ -2,8 +2,9 @@
 
 > 板型：YcscEsp32S3Es8311WgxlCat
 > 通信：UART 921600 baud
-> 上行：1302 直接吐 Opus 帧（ESP32 不再二次编码）
+> 上行：1302 原厂 Speex 编码（16kHz/20ms/43B）→ ESP32 解码 PCM → Opus 60ms 编码上云
 > 下行：ESP32 将云端 PCM 用 shine 编码为 MP3，1302 拉流播放
+> 录音启停：完全由 1302 原厂 VAD 自启停，ESP32 不下发 0x011A/0x011B
 
 ---
 
@@ -20,18 +21,18 @@ sequenceDiagram
     U->>C: 说唤醒词
     C->>E: 0x0102 WAKE_UP
     E->>S: WakeupStartListening → 开通道/发 listen start
-    E->>C: 0x011A SET_AUDIO_START_RECORD
-    Note over C: 开始采集上传（VAD_START 自启已屏蔽）
+    Note over C: 原厂 VAD 检测到人声即自动开始上传
 
     Note over U,C: ② 语音上行
     U->>C: 说话
-    C->>E: 0x0105 PCM_MIDDLE × N（Opus 帧）
+    C->>E: 0x0105 PCM_MIDDLE × N（1B 长度 + 42B Speex）
+    E->>E: Speex 解码 320 点/20ms → Opus 60ms 编码
     E->>S: 转发 Opus 帧
 
     Note over U,C: ③ 说完了
     U->>C: 停止说话
     C->>E: 0x0106 PCM_FINISH
-    Note over E: 只清上行队列，不调 StopListening
+    Note over E: 补零 flush 尾帧，不调 StopListening
     S->>E: 云端自动 VAD 提交 → STT 文本 → LLM → TTS
     E->>E: PCM → shine MP3 → 缓冲
 
@@ -46,8 +47,7 @@ sequenceDiagram
     E->>C: 0x020C PLAY_DATA_END（带尾部静音）
     C->>E: 0x020D PLAY_TTS_END
     E->>E: STATE → listening
-    E->>C: 0x011A SET_AUDIO_START_RECORD
-    Note over E,C: 回到 ②，等下一轮
+    Note over E,C: 回到 ②，等下一轮（1302 VAD 自动开始采集）
 ```
 
 ---
@@ -58,12 +58,14 @@ sequenceDiagram
 
 | 命令字 | 值 | 含义 |
 |---|---|---|
-| SET_AUDIO_START_RECORD | 0x011A | 强制开始录音上传 |
-| SET_AUDIO_STOP_RECORD | 0x011B | 停止录音上传 |
+| SET_AUDIO_VOLUME | 0x0117 | 设置音量（1-7） |
+| SET_VAD_END_SILENCE | 0x0110 | 静音多久判 VAD 结束 |
 | NET_PLAY_START | 0x0201 | 启动播放会话（1302 开始拉流） |
 | NET_PLAY_STOP | 0x0204 | 立即停止播放（打断） |
 | PLAY_DATA_RECV | 0x020B | 响应 1302 的 GET，携带 MP3 数据 |
 | PLAY_DATA_END | 0x020C | 播放数据发完（带尾部数据） |
+
+> 不再下发 0x011A/0x011B：录音启停由 1302 原厂 VAD 自行控制。
 
 ### CI1302 → ESP32（上行事件）
 
@@ -72,9 +74,9 @@ sequenceDiagram
 | LOCAL_ASR_NOTIFY | 0x0101 | 本地命令词命中 |
 | WAKE_UP | 0x0102 | 唤醒词检测到 |
 | VAD_END | 0x0103 | 人声结束（静音检测） |
-| PCM_MIDDLE | 0x0105 | Opus 上行帧（负载为 Opus 数据） |
+| PCM_MIDDLE | 0x0105 | 上行音频帧（1B 码流长度 + Speex 码流，20ms） |
 | PCM_FINISH | 0x0106 | 本句音频上传完毕 |
-| VAD_START | 0x0108 | 人声开始（原厂自启上传已屏蔽） |
+| VAD_START | 0x0108 | 人声开始（1302 原厂自动开始上传） |
 | PLAY_DATA_GET | 0x020A | 请求播放数据（负载 u32 请求长度） |
 | PLAY_TTS_END | 0x020D | 播放完成上报 |
 
@@ -86,18 +88,19 @@ sequenceDiagram
 stateDiagram-v2
     [*] --> Idle: 上电
     Idle --> Wake: 唤醒词命中
-    Wake --> Recording: 收到 0x011A\n(ESP32 控制)
-    Recording --> Sending: VAD_START\n开始推 Opus 帧
+    Wake --> Recording: VAD 检测到人声\n(1302 原厂自动)
+    Recording --> Sending: 推 Speex 帧
     Sending --> VADEnd: VAD_END 静音
     VADEnd --> Sending: 再次说话\n(多轮)
     VADEnd --> Finished: PCM_FINISH
-    Finished --> Recording: 下一轮 0x011A
+    Finished --> Recording: 下一轮 VAD 自动开始
     Finished --> Idle: 超时/退出
 ```
 
 **关键点：**
-- 唤醒后 1302 **不会自己开始上传**（原厂 `cias_aiot_vad_start_handle(VAD_START)` 已屏蔽），等 ESP32 发 `0x011A`。
+- 1302 唤醒后由原厂 VAD 自行判断何时开始/停止上传，ESP32 不下发 0x011A/0x011B。
 - 录音期间 VAD_END 检测**必须保留**，否则 1302 一直上传不发 PCM_FINISH，云端等不到句子边界。
+- `PCM_MIDDLE` 负载首字节为码流长度（典型 0x2A=42），1302 按 43B 定长上传，尾部可能补 0。
 
 ---
 
@@ -129,8 +132,8 @@ stateDiagram-v2
 ```mermaid
 flowchart LR
     A[WAKE_UP] --> B[开通道/listen start]
-    B --> C[0x011A 开始录音]
-    C --> D[用户说话\nOpus 上行]
+    B --> C[1302 VAD 自动开始采集]
+    C --> D[用户说话\nSpeex 上行 → ESP32 转 Opus]
     D --> E[VAD_END / PCM_FINISH]
     E --> F[云端自动 VAD 提交]
     F --> G[STT → LLM → TTS]
@@ -148,7 +151,7 @@ flowchart LR
 |---|---|---|
 | 唤醒检测 | ESP32 本地 AFE | 1302 外置芯片检测 |
 | VAD | ESP32 本地 | 1302 外置芯片 |
-| 上行编码 | ESP32 Opus 编码 | 1302 直接吐 Opus，ESP32 直通 |
+| 上行编码 | ESP32 Opus 编码 | 1302 Speex 编码 → ESP32 解码后 Opus 编码 |
 | 下行播放 | ESP32 I2S DAC | ESP32 shine→MP3，1302 拉流播放 |
-| 录音控制 | 无（I2S 常开） | 0x011A 开始 / 0x011B 停止 |
-| 句子收尾 | ESP32 VAD 触发 stop | 云端自动 VAD 提交（PCM_FINISH 只清队列） |
+| 录音控制 | 无（I2S 常开） | 1302 原厂 VAD 自启停（不下发 0x011A/0x011B） |
+| 句子收尾 | ESP32 VAD 触发 stop | 云端自动 VAD 提交（PCM_FINISH 补零 flush 尾帧） |

@@ -1,5 +1,8 @@
 # ES8311 vs CI1302 音频架构与工作流程对比
 
+> **更新**：CI1302 上行现为 **Speex 编码（1302）→ ESP32 解码 → Opus 60ms 编码上云**，
+> 本文中“Opus 帧直通”的描述已过时；以上行链路请以根目录 `CI1302_UART_音频通路集成说明.md` 为准。
+
 > 板型：YcscEsp32S3Es8311WgxlCat
 > ESP32：ESP32-S3
 > 云端：MQTT 协议，Opus 音频帧
