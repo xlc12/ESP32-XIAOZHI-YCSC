@@ -73,19 +73,17 @@ private:
 
         // 如果电量低于低电量报警阈值且未在充电，且未充电完成，则进行报警
         if(battery_level_ <= LOW_BATTERY_ALARM_LEVEL && !is_charging_ && !is_charging_complete_) {
-            ESP_LOGW("PowerManager", "电量过低，>>>>>>>>");
-            // 在这里可以添加关机逻辑，例如调用系统API进行关机
-            
+            // 调试期关闭播报：低电量提示音会打断语音对话
             if (current_time - last_low_battery_time_ >= LOW_BATTERY_ALARM_INTERVAL_MS * 1000) {
                 last_low_battery_time_ = current_time;
-                app.PlaySound(Lang::Sounds::OGG_1_4_LOW_BATTERY);
+                // app.PlaySound(Lang::Sounds::OGG_1_4_LOW_BATTERY);
             }
         }
 
         //开始充电提醒
         if(is_charging_ && (last_start_charging_flag == 0)){
             last_start_charging_flag = 1;
-            app.PlaySound(Lang::Sounds::OGG_1_5_CHARGING);
+            // app.PlaySound(Lang::Sounds::OGG_1_5_CHARGING);  // 调试期关闭播报
             auto display = Board::GetInstance().GetDisplay();
             display->SetEmotion("Charging_1_1");
         }
@@ -98,7 +96,6 @@ private:
 
         //充电完成提示
         if(is_charging_complete_) {
-            ESP_LOGI("PowerManager", "充电完成");
             if (current_time - last_charging_complete_time_ >= CHARGING_COMPLETE_ALARM_INTERVAL_MS * 1000) {
                 last_charging_complete_time_ = current_time;
                 // //循环播放提示音
@@ -107,7 +104,7 @@ private:
                 //     //延时1秒
                 //     vTaskDelay(pdMS_TO_TICKS(3000));
                 // }
-                app.PlaySound(Lang::Sounds::OGG_1_6_CHARG_END);
+                // app.PlaySound(Lang::Sounds::OGG_1_6_CHARG_END);  // 调试期关闭播报
             }
         }
     }

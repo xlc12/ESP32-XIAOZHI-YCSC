@@ -1,5 +1,6 @@
 #include "wifi_board.h"
 #include "codecs/es8311_audio_codec.h"
+#include "codecs/ci130x_audio_codec.h"
 #include "display/lcd_display.h"
 #include "application.h"
 #include "button.h"
@@ -427,10 +428,34 @@ public:
     }
 
     virtual AudioCodec* GetAudioCodec() override {
-         static Es8311AudioCodec audio_codec(i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+#if AUDIO_CODEC_CI130X_ENABLE
+        // CI130X 方案：I2S 从机收发 + UART 控制，不再使用 ES8311 / PA
+        static Ci130xAudioCodec audio_codec(
+            CI130X_UART_PORT, CI130X_UART_TX_PIN, CI130X_UART_RX_PIN, CI130X_UART_BAUD_RATE,
+            AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN);
+        // CI130X 自带离线唤醒，收到 0x0102 后直接走小智的唤醒流程。
+        // 注意：CI 的唤醒词检测是常开的，会重复上报。如果设备已经在 listening，
+        // WakeWordInvoke 会走 CloseAudioChannel 分支，直接把正在进行的会话掐掉，
+        // 表现就是"再喊一次唤醒词反而彻底不识别"。
+        // 因此这里只允许 idle（开新会话）和 speaking（打断播报）两种情况生效。
+        Ci130xAudioCodec::SetWakeWordHandler([](const std::string& wake_word) {
+            auto& app = Application::GetInstance();
+            auto state = app.GetDeviceState();
+            ESP_LOGI(TAG, "CI wake word \"%s\", state=%d", wake_word.c_str(), (int)state);
+            if (state == kDeviceStateIdle || state == kDeviceStateSpeaking) {
+                app.WakeWordInvoke(wake_word);
+            } else {
+                ESP_LOGW(TAG, "忽略唤醒词：当前状态 %d 不允许开会话", (int)state);
+            }
+        });
+        return &audio_codec;
+#else
+        static Es8311AudioCodec audio_codec(i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
             AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
         return &audio_codec;
+#endif
     }
 
     virtual Display* GetDisplay() override {
