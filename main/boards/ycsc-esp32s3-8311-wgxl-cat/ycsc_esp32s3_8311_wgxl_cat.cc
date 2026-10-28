@@ -449,6 +449,21 @@ public:
                 ESP_LOGW(TAG, "忽略唤醒词：当前状态 %d 不允许开会话", (int)state);
             }
         });
+
+        // ESP32 回到待机时，同步通知 CI130X 退出唤醒态（0x010D）。
+        // 只注册一次，否则 GetAudioCodec() 被多次调用会重复挂回调。
+        static bool state_callback_registered = false;
+        if (!state_callback_registered) {
+            state_callback_registered = true;
+            DeviceStateEventManager::GetInstance().RegisterStateChangeCallback(
+                [](DeviceState previous, DeviceState current) {
+                    if (current == kDeviceStateIdle) {
+                        ESP_LOGI(TAG, "STATE %d -> idle，通知 CI130X 退出唤醒", (int)previous);
+                        static_cast<Ci130xAudioCodec*>(
+                            Board::GetInstance().GetAudioCodec())->RequestExitWakeUp();
+                    }
+                });
+        }
         return &audio_codec;
 #else
         static Es8311AudioCodec audio_codec(i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,

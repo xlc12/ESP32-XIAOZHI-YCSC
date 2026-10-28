@@ -37,6 +37,10 @@ public:
      */
     static void SetWakeWordHandler(std::function<void(const std::string&)> handler);
 
+    // 由设备状态回调触发：ESP32 回到待机时，让 CI130X 也退出唤醒态。
+    // 只是置标志，真正的串口下发在 SyncTask 里做，避免阻塞调用者。
+    void RequestExitWakeUp();
+
 protected:
     virtual int Read(int16_t* dest, int samples) override;
     virtual int Write(const int16_t* data, int samples) override;
@@ -63,6 +67,15 @@ private:
     bool applied_input_ = false;
     bool applied_output_ = false;
     uint8_t applied_volume_ = 0;
+
+    // CI 的"唤醒态超时自动退出"改成极长（uint16 秒，65535s ≈ 18 小时），
+    // 录音开关改由 ESP32 的 0x011A / 0x011B 掌握，长对话不会被它自己掐断。
+    uint16_t wake_timeout_s_ = 65535;
+    uint16_t applied_wake_timeout_ = 0;
+
+    // CI 当前是否处于唤醒态（由 0x0102 / 0x0109 事件维护）
+    std::atomic<bool> ci_awake_{false};
+    std::atomic<bool> exit_wakeup_requested_{false};
 
     TaskHandle_t sync_task_ = nullptr;
 

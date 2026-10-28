@@ -14,6 +14,10 @@ void Ci130xAudioCodec::SetWakeWordHandler(std::function<void(const std::string&)
     wake_word_handler_ = std::move(handler);
 }
 
+void Ci130xAudioCodec::RequestExitWakeUp() {
+    exit_wakeup_requested_.store(true);
+}
+
 Ci130xAudioCodec::Ci130xAudioCodec(uart_port_t uart_port, gpio_num_t uart_tx, gpio_num_t uart_rx,
                                    int uart_baud, int input_sample_rate, int output_sample_rate,
                                    gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din) {
@@ -39,6 +43,7 @@ Ci130xAudioCodec::Ci130xAudioCodec(uart_port_t uart_port, gpio_num_t uart_tx, gp
                 break;
             case Ci130xProtocol::WAKE_UP:
                 ESP_LOGI(TAG, ">>>>> [CI-EVT] WAKE_UP 唤醒");
+                ci_awake_.store(true);
                 // 唤醒瞬间让后台立刻补一次"开始录音"，避免 CI 已经唤醒、
                 // ESP32 却因为状态机还没走到 listening 而收不到上行数据。
                 force_record_resync_.store(true);
@@ -54,6 +59,7 @@ Ci130xAudioCodec::Ci130xAudioCodec(uart_port_t uart_port, gpio_num_t uart_tx, gp
                 break;
             case Ci130xProtocol::EXIT_WAKE_UP:
                 ESP_LOGI(TAG, ">>>>> [CI-EVT] EXIT_WAKE_UP 退出唤醒态");
+                ci_awake_.store(false);
                 // 退出唤醒态会把 is_wake_up_flag 清掉；如果此时会话仍在进行，
                 // 必须靠 0x011A 的常开标志兜住，这里补一次保险。
                 force_record_resync_.store(true);
@@ -156,6 +162,7 @@ bool Ci130xAudioCodec::SyncWithChip(bool force) {
         applied_input_ = !input_requested_;
         applied_output_ = !output_requested_;
         applied_volume_ = 0;
+        applied_wake_timeout_ = 0;
     }
 
     if (input_requested_ != applied_input_) {
@@ -194,6 +201,19 @@ bool Ci130xAudioCodec::SyncWithChip(bool force) {
         }
     }
 
+    // 把 CI 的"唤醒态自动退出"推到几乎不触发，改由 ESP32 的 0x011A/0x011B 控制录音。
+    // CI 收的是 uint16 秒数，内部 xTimerChangePeriod(秒*1000)，所以不能发 0。
+    if (wake_timeout_s_ != applied_wake_timeout_) {
+        uint8_t payload[2] = {(uint8_t)(wake_timeout_s_ & 0xFF), (uint8_t)(wake_timeout_s_ >> 8)};
+        if (protocol_->SendCommand(Ci130xProtocol::SET_WAKE_UP_CONTINUE_TIME, payload, 2)) {
+            applied_wake_timeout_ = wake_timeout_s_;
+            ESP_LOGI(TAG, ">>>>> [CI-CMD] 唤醒超时 = %u 秒（不再自动退出唤醒态）", wake_timeout_s_);
+        } else {
+            ESP_LOGW(TAG, ">>>>> [CI-CMD] 设置唤醒超时失败，稍后重试");
+            ok = false;
+        }
+    }
+
     return ok;
 }
 
@@ -218,6 +238,18 @@ void Ci130xAudioCodec::SyncTask() {
                     applied_input_ = true;
                     ESP_LOGW(TAG, ">>>>> [CI-CMD] START_RECORD 重发成功");
                 }
+            }
+        }
+
+        // ESP32 已经回到待机：让 CI 也退出唤醒态（0x010D）。
+        // payload=0 表示不播"退出唤醒"提示音，避免待机时突然出声。
+        if (exit_wakeup_requested_.exchange(false) && ci_awake_.load()) {
+            uint8_t no_prompt = 0;
+            std::lock_guard<std::mutex> sync_lock(sync_mutex_);
+            if (protocol_->SendCommand(Ci130xProtocol::SET_AUDIO_EXIT_WAKE_UP, &no_prompt, 1)) {
+                ESP_LOGI(TAG, "<<<<< [CI-CMD] ESP32 已待机，通知 CI 退出唤醒");
+            } else {
+                ESP_LOGW(TAG, "<<<<< [CI-CMD] 退出唤醒下发失败");
             }
         }
 

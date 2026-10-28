@@ -37,6 +37,8 @@ public:
         VAD_START                 = 0x0108,  // 检测到人声开始
         EXIT_WAKE_UP              = 0x0109,  // 退出唤醒态
 
+        SET_AUDIO_EXIT_WAKE_UP    = 0x010D,  // payload: 1 字节，1=带退出提示音 0=不带
+        SET_WAKE_UP_CONTINUE_TIME = 0x0113,  // payload: uint16 秒，唤醒态持续超时
         SET_AUDIO_VOLUME          = 0x0117,  // payload: 1~7
         SET_VOLUME_MUTE_STATE     = 0x0119,  // payload: 1=mute 0=unmute
         SET_AUDIO_START_RECORD    = 0x011A,  // 开始录音，IIS 输出有效 PCM
