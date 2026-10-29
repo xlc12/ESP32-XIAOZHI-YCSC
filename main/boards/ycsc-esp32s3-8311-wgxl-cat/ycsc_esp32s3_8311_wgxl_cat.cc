@@ -429,11 +429,13 @@ public:
 
     virtual AudioCodec* GetAudioCodec() override {
 #if AUDIO_CODEC_CI130X_ENABLE
-        // CI130X 方案：I2S 从机收发 + UART 控制，不再使用 ES8311 / PA
+        // CI130X 方案：I2S 从机收发 + UART 控制，不再使用 ES8311
+        // 功放使能由 ESP32 的 GPIO43 控制（高电平使能），只在播放时打开
         static Ci130xAudioCodec audio_codec(
             CI130X_UART_PORT, CI130X_UART_TX_PIN, CI130X_UART_RX_PIN, CI130X_UART_BAUD_RATE,
             AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN);
+            AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
+            CI130X_PA_PIN, CI130X_PA_ACTIVE_HIGH);
         // CI130X 自带离线唤醒，收到 0x0102 后直接走小智的唤醒流程。
         // 注意：CI 的唤醒词检测是常开的，会重复上报。如果设备已经在 listening，
         // WakeWordInvoke 会走 CloseAudioChannel 分支，直接把正在进行的会话掐掉，

@@ -20,7 +20,8 @@ void Ci130xAudioCodec::RequestExitWakeUp() {
 
 Ci130xAudioCodec::Ci130xAudioCodec(uart_port_t uart_port, gpio_num_t uart_tx, gpio_num_t uart_rx,
                                    int uart_baud, int input_sample_rate, int output_sample_rate,
-                                   gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din) {
+                                   gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
+                                   gpio_num_t pa_pin, bool pa_active_high) {
     duplex_ = true;
     input_reference_ = false;
     input_channels_ = 1;   // 框架侧按单声道处理，双声道拆解在 Read/Write 里完成
@@ -29,6 +30,22 @@ Ci130xAudioCodec::Ci130xAudioCodec(uart_port_t uart_port, gpio_num_t uart_tx, gp
     output_sample_rate_ = output_sample_rate;
 
     assert(input_sample_rate_ == output_sample_rate_);
+
+    // 功放使能脚：初始化成输出，并先置为"不使能"，等真正开始播放时再打开
+    pa_pin_ = pa_pin;
+    pa_active_high_ = pa_active_high;
+    if (pa_pin_ != GPIO_NUM_NC) {
+        gpio_config_t pa_cfg = {};
+        pa_cfg.pin_bit_mask = (1ULL << pa_pin_);
+        pa_cfg.mode = GPIO_MODE_OUTPUT;
+        pa_cfg.pull_up_en = GPIO_PULLUP_DISABLE;
+        pa_cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        pa_cfg.intr_type = GPIO_INTR_DISABLE;
+        ESP_ERROR_CHECK(gpio_config(&pa_cfg));
+        UpdatePaState();
+        ESP_LOGI(TAG, "PA enable pin %d configured (%s active)",
+                 (int)pa_pin_, pa_active_high_ ? "high" : "low");
+    }
 
     protocol_ = new Ci130xProtocol(uart_port, uart_tx, uart_rx, uart_baud);
     protocol_->SetEventCallback([this](uint16_t type, const uint8_t* payload, uint16_t len) {
@@ -302,11 +319,25 @@ void Ci130xAudioCodec::EnableOutput(bool enable) {
         return;
     }
     AudioCodec::EnableOutput(enable);
+    // 功放使能跟着播放状态走：播放前打开，停止后关闭，避免待机时的底噪/自激
+    UpdatePaState();
+    if (pa_pin_ != GPIO_NUM_NC) {
+        ESP_LOGI(TAG, "PA %s (pin %d = %d)", enable ? "ON" : "OFF",
+                 (int)pa_pin_, gpio_get_level(pa_pin_));
+    }
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
         output_requested_ = enable;
     }
     SyncWithChip();
+}
+
+void Ci130xAudioCodec::UpdatePaState() {
+    if (pa_pin_ == GPIO_NUM_NC) {
+        return;
+    }
+    int level = output_enabled_ ? (pa_active_high_ ? 1 : 0) : (pa_active_high_ ? 0 : 1);
+    gpio_set_level(pa_pin_, level);
 }
 
 int Ci130xAudioCodec::Read(int16_t* dest, int samples) {

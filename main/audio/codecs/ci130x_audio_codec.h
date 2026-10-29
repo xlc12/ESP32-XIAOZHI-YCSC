@@ -23,7 +23,8 @@ class Ci130xAudioCodec : public AudioCodec {
 public:
     Ci130xAudioCodec(uart_port_t uart_port, gpio_num_t uart_tx, gpio_num_t uart_rx, int uart_baud,
                      int input_sample_rate, int output_sample_rate,
-                     gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din);
+                     gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
+                     gpio_num_t pa_pin = GPIO_NUM_NC, bool pa_active_high = true);
     virtual ~Ci130xAudioCodec();
 
     virtual void SetOutputVolume(int volume) override;
@@ -47,6 +48,8 @@ protected:
 
 private:
     void CreateDuplexChannels(gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din);
+    // 按 output_enabled_ 驱动功放使能脚：高电平使能的功放在播放时输出高、其余输出低
+    void UpdatePaState();
     // 把"期望状态"同步到 CI：录音开关、播放窗口、音量。全部已一致时返回 true
     // force=true 时无视"已同步"缓存，强制全部重发（CI 重启后必须这样做）
     bool SyncWithChip(bool force = false);
@@ -54,6 +57,9 @@ private:
     void SyncTask();
 
     Ci130xProtocol* protocol_ = nullptr;
+
+    gpio_num_t pa_pin_ = GPIO_NUM_NC;   // 功放使能脚，GPIO_NUM_NC 表示不控制
+    bool pa_active_high_ = true;        // true: 高电平使能；false: 低电平使能
 
     static std::function<void(const std::string&)> wake_word_handler_;
 
