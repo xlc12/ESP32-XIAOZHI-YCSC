@@ -38,6 +38,15 @@ public:
      */
     static void SetWakeWordHandler(std::function<void(const std::string&)> handler);
 
+    /**
+     * 只切换"CI 侧上行开关"（0x011A / 0x011B），不动 ESP32 自己的读取。
+     * ESP32 继续读 I2S（拿到静音），避免 Read() 立刻返回 0 把输入任务打成空转。
+     *
+     * 【EXP-004 判定实验】进入播报时关掉它，就能测出"回复期间 1302 仍在上行"
+     * 到底是不是重启的触发条件。
+     */
+    void SetChipUplinkEnabled(bool enable);
+
     // 由设备状态回调触发：ESP32 回到待机时，让 CI130X 也退出唤醒态。
     // 只是置标志，真正的串口下发在 SyncTask 里做，避免阻塞调用者。
     void RequestExitWakeUp();
@@ -73,6 +82,8 @@ private:
     bool applied_input_ = false;
     bool applied_output_ = false;
     uint8_t applied_volume_ = 0;
+    // 功放常开：只下发一次，CI 重启（引脚回到默认）后要重发
+    bool applied_pa_on_ = false;
 
     // CI 的"唤醒态超时自动退出"改成极长（uint16 秒，65535s ≈ 18 小时），
     // 录音开关改由 ESP32 的 0x011A / 0x011B 掌握，长对话不会被它自己掐断。

@@ -464,6 +464,19 @@ public:
                         static_cast<Ci130xAudioCodec*>(
                             Board::GetInstance().GetAudioCodec())->RequestExitWakeUp();
                     }
+
+                    // ===== EXP-004 半双工判定实验 =====
+                    // 目的：确认"回复期间 CI 仍在上行"是不是重启的触发条件。
+                    // 进入播报 -> 发 0x011B，让 CI 立刻停止上行（不再产生 IIS TX 帧）；
+                    // 回到聆听 -> 发 0x011A 恢复。
+                    // 若有此改动后不再重启，说明问题在上行并发；若照旧，则与上行无关。
+                    auto* ci_codec = static_cast<Ci130xAudioCodec*>(
+                        Board::GetInstance().GetAudioCodec());
+                    if (current == kDeviceStateSpeaking) {
+                        ci_codec->SetChipUplinkEnabled(false);
+                    } else if (current == kDeviceStateListening) {
+                        ci_codec->SetChipUplinkEnabled(true);
+                    }
                 });
         }
         return &audio_codec;

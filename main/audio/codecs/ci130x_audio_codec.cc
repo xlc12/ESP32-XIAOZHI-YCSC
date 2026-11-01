@@ -18,6 +18,21 @@ void Ci130xAudioCodec::RequestExitWakeUp() {
     exit_wakeup_requested_.store(true);
 }
 
+void Ci130xAudioCodec::SetChipUplinkEnabled(bool enable) {
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (input_requested_ != enable) {
+            input_requested_ = enable;
+            changed = true;
+        }
+    }
+    if (!changed) {
+        return;
+    }
+    SyncWithChip();
+}
+
 Ci130xAudioCodec::Ci130xAudioCodec(uart_port_t uart_port, gpio_num_t uart_tx, gpio_num_t uart_rx,
                                    int uart_baud, int input_sample_rate, int output_sample_rate,
                                    gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
@@ -180,6 +195,24 @@ bool Ci130xAudioCodec::SyncWithChip(bool force) {
         applied_output_ = !output_requested_;
         applied_volume_ = 0;
         applied_wake_timeout_ = 0;
+        applied_pa_on_ = false;
+    }
+
+    // 功放常开：开机后下发一次，之后不再管；CI 重启（PC4 回到默认电平）后重发。
+    //
+    // 注意 1302 侧的实现是"低电平有效"（GS0XJ_BOARD_PA_AUTO=0）：
+    //   0x0119 = 1 -> power_amplifier_off()  -> PC4 拉高
+    //   0x0119 = 0 -> power_amplifier_on()   -> PC4 拉低
+    // 而本板功放硬件是"高电平有效"，所以要让功放开着，必须发 1（名字叫 off，实际是拉高）。
+    if (!applied_pa_on_) {
+        uint8_t pa_on = 1;
+        if (protocol_->SendCommand(Ci130xProtocol::SET_VOLUME_MUTE_STATE, &pa_on, 1)) {
+            applied_pa_on_ = true;
+            ESP_LOGI(TAG, "<<<<< [CI-CMD] 功放常开 (0x0119=1 -> PC4 拉高)");
+        } else {
+            ESP_LOGW(TAG, "<<<<< [CI-CMD] 功放开启失败，稍后重试");
+            ok = false;
+        }
     }
 
     if (input_requested_ != applied_input_) {
