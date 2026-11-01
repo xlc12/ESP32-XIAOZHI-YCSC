@@ -1,6 +1,6 @@
 ---
 name: ci130x-audio-port
-description: Port a CI130X (CI1302 or CI1306) voice chip into xiaozhi-esp32 as an I2S slave codec controlled over UART. Use when integrating CI130X audio, fixing silence, wake-word or duplex I2S problems. Do not use for ES8311 or other register-based codecs.
+description: Port a CI130X (CI1302 or CI1306) voice chip into xiaozhi-esp32 as an I2S slave codec controlled over UART, including packaging it as a reusable ESP-IDF component. Use when integrating CI130X audio, fixing silence, wake-word or duplex I2S problems, or extracting the driver to other boards/projects. Do not use for ES8311 or other register-based codecs.
 ---
 
 # CI130X 音频移植
@@ -22,6 +22,33 @@ description: Port a CI130X (CI1302 or CI1306) voice chip into xiaozhi-esp32 as a
 5. **桥接唤醒**：CI 的 `WAKE_UP` 事件 → `Application::WakeWordInvoke()`。必须按设备状态过滤，见「必踩的坑」第 3 条。
 6. **接功放**：构造函数接收 `pa_pin` 与极性，`EnableOutput()` 里跟随 `output_enabled_` 驱动。
 7. **收敛日志**：把全局日志压到 ERROR，只放行应用、Codec、协议三个 TAG，否则 AFE 与 LVGL 的刷屏会淹没音频调试信息。
+
+## 组件化打包（跨工程复用）
+
+核心原则：**驱动进 `components/`，适配器留 `main`，板级语义进胶水**。详细设计与代码见 `references/packaging.md`。
+
+| 层 | 位置 | 依赖 | 职责 |
+|---|---|---|---|
+| L1 驱动 | `components/ci130x_voice/` | 仅 ESP-IDF | 协议、I2S 从机、PA、音量、状态同步、看门狗 |
+| L2 适配器 | `main/audio/codecs/ci130x_audio_codec.*` | L1 + `AudioCodec` | 只做接口转发，约 60 行 |
+| L3 胶水 | `main/boards/common/ci130x_board_glue.*` | L2 + `Application` | 唤醒桥接、设备状态桥接、EXP-004 选项 |
+
+硬性约束：
+
+- `audio_codec.h` 反向 `#include "board.h"`，ESP-IDF 组件不能依赖 `main`，所以 **L2 不能搬进组件**。
+- L1 的引脚全部走运行时 `Ci130xConfig`，**不要写进 Kconfig**，否则换板就要改组件。
+- L1 不得包含 `audio_codec.h` / `board.h` / `application.h`。
+- 静态 `SetWakeWordHandler` 改成实例 `SetEventCallback`，避免单实例限制。
+
+## 快速移植到新板
+
+1. 引用组件，板级 `config.h` 填 I2S 四线 + UART 三参数 + PA。
+2. `GetAudioCodec()` 构造适配器并调用 `Ci130xBoardGlue::Attach()`。
+3. `main/CMakeLists.txt` 只登记适配器源文件，组件源文件不用登记。
+4. 新板型要加 Kconfig，并核对 `sdkconfig.defaults` 与 `config.json` 的板型符号一致。
+5. 按 `references/porting.md` 的 7 步验证。
+
+常见“能编译但不好用”的漏项：`CONFIG_USE_AUDIO_PROCESSOR`、`USE_SERVER_AEC` / `USE_DEVICE_AEC` 二选一、唤醒词重复、日志等级。
 
 ## I2S 参数（从机侧）
 
@@ -57,4 +84,4 @@ description: Port a CI130X (CI1302 or CI1306) voice chip into xiaozhi-esp32 as a
 4. 云端回复后是否听到声音 → 验证下行与 `0x0220` 播放窗口。
 5. 空口 15 秒后功放是否自动关闭（`PA OFF`）→ 验证电源管理。
 
-日志判读与故障对照见 `references/troubleshooting.md`。
+日志判读与故障对照见 `references/troubleshooting.md`；组件化细节见 `references/packaging.md`；移植清单见 `references/porting.md`。
